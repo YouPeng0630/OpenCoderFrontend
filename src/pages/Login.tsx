@@ -22,11 +22,19 @@ export function Login() {
   }, [isAuthenticated, user, navigate])
 
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL
-  const authCallbackUrl = (import.meta as any).env.VITE_AUTH_CALLBACK 
+  const authCallbackUrl = (import.meta as any).env.VITE_AUTH_CALLBACK
 
   const handleLogin = () => {
     setLoading(true)
+    
+    // Debug: Log environment variables
+    console.log('🔧 Environment Variables:')
+    console.log('  API Base URL:', apiBaseUrl)
+    console.log('  Auth Callback:', authCallbackUrl)
+    
     const redirectUrl = `${apiBaseUrl}/auth/login?redirect_uri=${encodeURIComponent(authCallbackUrl)}`
+    console.log('🔗 Redirect URL:', redirectUrl)
+    
     window.location.href = redirectUrl
   }
 
