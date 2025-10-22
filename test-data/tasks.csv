@@ -1,0 +1,12 @@
+task_content,priority,category
+Review user feedback from mobile app,high,feedback
+Update API documentation for v2.0,medium,documentation
+Test new authentication flow,high,testing
+Implement dark mode toggle feature,medium,feature
+Fix login page styling issues,low,bugfix
+Analyze competitor features comparison,medium,research
+Design new dashboard layout mockup,high,design
+Optimize database query performance,high,optimization
+Create onboarding tutorial videos,low,content
+Refactor legacy code in payment module,medium,refactoring
+

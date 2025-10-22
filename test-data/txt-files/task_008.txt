@@ -1,0 +1,1 @@
+Migrate legacy Redux state management to React Query for improved data fetching, caching, and server state synchronization.

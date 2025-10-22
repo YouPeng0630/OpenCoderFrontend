@@ -1,0 +1,1 @@
+Optimize image loading performance by implementing lazy loading and responsive image sizing across all product gallery pages.
