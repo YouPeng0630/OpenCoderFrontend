@@ -77,7 +77,7 @@ export function Login() {
         </Card>
 
         <div className="text-center text-xs text-gray-400">
-          <p>© 2024 Open Coder. All rights reserved.</p>
+          <p>© 2025 Open Coder. All rights reserved.</p>
         </div>
       </div>
     </div>
