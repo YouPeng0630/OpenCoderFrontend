@@ -42,9 +42,9 @@ export function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full space-y-6">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900">Project Management Platform</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Open Coder</h1>
           <p className="mt-2 text-sm text-gray-600">
-            Professional project management and development collaboration platform
+            Collaborative annotation and project management platform
           </p>
         </div>
 
@@ -77,7 +77,7 @@ export function Login() {
         </Card>
 
         <div className="text-center text-xs text-gray-400">
-          <p>© 2024 Project Management Platform. All rights reserved.</p>
+          <p>© 2024 Open Coder. All rights reserved.</p>
         </div>
       </div>
     </div>
