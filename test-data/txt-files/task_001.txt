@@ -1,0 +1,1 @@
+Conduct user interview sessions with 5 beta testers to gather feedback on the new dashboard interface and identify usability issues.

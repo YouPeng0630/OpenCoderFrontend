@@ -1,0 +1,1 @@
+Research and document best practices for accessibility compliance (WCAG 2.1 Level AA) and create implementation guidelines for the team.

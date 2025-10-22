@@ -1,0 +1,1 @@
+Set up automated CI/CD pipeline with GitHub Actions for running tests, linting, and deploying to staging environment on every pull request.

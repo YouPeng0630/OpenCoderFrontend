@@ -1,0 +1,1 @@
+Write comprehensive unit tests for the user authentication module covering login, logout, password reset, and session management scenarios.

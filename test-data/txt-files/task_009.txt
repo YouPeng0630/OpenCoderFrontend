@@ -1,0 +1,1 @@
+Conduct security audit of authentication endpoints and implement rate limiting, CSRF protection, and secure session token management.
