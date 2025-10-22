@@ -21,8 +21,8 @@ export function Login() {
     }
   }, [isAuthenticated, user, navigate])
 
-  const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
-  const authCallbackUrl = (import.meta as any).env.VITE_AUTH_CALLBACK || 'http://localhost:5173/auth/callback'
+  const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL
+  const authCallbackUrl = (import.meta as any).env.VITE_AUTH_CALLBACK 
 
   const handleLogin = () => {
     setLoading(true)
