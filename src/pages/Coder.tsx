@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { getToken } from '@/lib/storage';
@@ -15,14 +15,27 @@ import {
   AlertCircle,
   Loader2,
   CheckCircle,
-  ChevronRight
+  ChevronRight,
+  Sparkles
 } from 'lucide-react';
+import { MessageManagerDialog } from '@/components/notifications/MessageManagerDialog';
+import { ChatButton } from '@/components/chat/ChatButton';
 
 interface Task {
   id: string;
   title: string;
+  task_type?: 'text' | 'url' | 'image';
   payload: {
-    text: string;
+    text?: string;
+    image?: {
+      drive_file_url: string;
+      drive_cdn_url?: string;  // Google CDN URL (备选，更快)
+      drive_view_url?: string;
+      drive_thumbnail_url?: string;
+      original_filename: string;
+      file_size: number;
+      mime_type: string;
+    };
     [key: string]: any;
   };
   status: string;
@@ -53,7 +66,11 @@ interface TagGroup {
   };
 }
 
-export const Coder: React.FC = () => {
+interface CoderProps {
+  noLayout?: boolean;  // Optional prop to skip PageLayout wrapper
+}
+
+export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
   
@@ -64,6 +81,11 @@ export const Coder: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [loadingAISuggestion, setLoadingAISuggestion] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<{
+    confidence: number;
+    reasoning: string;
+  } | null>(null);
 
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -243,6 +265,7 @@ export const Coder: React.FC = () => {
         const transformedTask: Task = {
           id: task._id || task.id,
           title: task.title || 'Untitled Task',
+          task_type: task.task_type || 'text',
           payload: task.payload || { text: '' },
           status: task.status || 'in_progress',
           tags: task.tags || {},
@@ -250,7 +273,7 @@ export const Coder: React.FC = () => {
         };
         setCurrentTask(transformedTask);
         setSelectedTags({});  // Reset tags for new task
-        console.log('✅ Current task loaded:', transformedTask.id);
+        console.log('✅ Current task loaded:', transformedTask.id, 'type:', transformedTask.task_type);
       } else {
         console.log('⚠️ No task in response');
         setCurrentTask(null);
@@ -358,6 +381,82 @@ export const Coder: React.FC = () => {
       }
     }
     return null;
+  };
+
+  const handleGetAISuggestion = async () => {
+    if (!currentTask || !user?.project_id) {
+      setMessage({ type: 'error', text: 'No task available' });
+      return;
+    }
+
+    try {
+      setLoadingAISuggestion(true);
+      setMessage(null);
+      setAiSuggestion(null);
+
+      const token = getToken();
+      if (!token) throw new Error('No authentication token');
+
+      console.log('🤖 Getting AI suggestion...');
+
+      // 准备tag_groups数据
+      const tagGroupsForAI = tagGroups.map(group => ({
+        group_id: group.group_id,
+        group_name: group.name,
+        type: group.type,
+        options: group.options.map(opt => ({
+          value: (opt as any).option_id || opt.value || opt.label,
+          label: opt.label
+        }))
+      }));
+
+      const response = await fetch(
+        `${apiBaseUrl}/api/llm/annotate?token=${encodeURIComponent(token)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sentence: currentTask.payload.text,
+            tag_groups: tagGroupsForAI
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(errorData?.detail || `Failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ AI suggestion received:', result);
+
+      if (result.success) {
+        // Auto-fill AI suggested labels
+        const suggestions: { [groupId: string]: string[] } = {};
+        result.annotation.labels.forEach((label: any) => {
+          suggestions[label.group_id] = label.selected;
+        });
+
+        setSelectedTags(suggestions);
+        setAiSuggestion({
+          confidence: result.annotation.overall_confidence,
+          reasoning: result.annotation.reasoning
+        });
+
+        setMessage({
+          type: 'success',
+          text: `AI suggestions applied (confidence: ${(result.annotation.overall_confidence * 100).toFixed(0)}%)`
+        });
+      }
+    } catch (error) {
+      console.error('❌ Failed to get AI suggestion:', error);
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to get AI suggestion'
+      });
+    } finally {
+      setLoadingAISuggestion(false);
+    }
   };
 
   const handleSave = async () => {
@@ -524,22 +623,26 @@ export const Coder: React.FC = () => {
     }
   };
 
+  const ContentWrapper: React.FC<{ children: ReactNode }> = ({ children }) => {
+    return noLayout ? <>{children}</> : <PageLayout>{children}</PageLayout>;
+  };
+
   if (loading) {
     return (
-      <PageLayout>
+      <ContentWrapper>
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
             <p className="text-gray-500">Loading annotation interface...</p>
           </div>
         </div>
-      </PageLayout>
+      </ContentWrapper>
     );
   }
 
   if (!currentTask) {
     return (
-      <PageLayout>
+      <ContentWrapper>
         <div className="max-w-4xl mx-auto">
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
@@ -552,13 +655,22 @@ export const Coder: React.FC = () => {
             </CardContent>
           </Card>
         </div>
-      </PageLayout>
+      </ContentWrapper>
     );
   }
 
   return (
-    <PageLayout>
+    <ContentWrapper>
       <div className="max-w-6xl mx-auto space-y-6">
+        {/* Page Header with Message Button */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Task Annotation</h1>
+            <p className="text-sm text-gray-500 mt-1">Complete your assigned tasks</p>
+          </div>
+          <MessageManagerDialog />
+        </div>
+
         {/* Message Display */}
         {message && (
           <div
@@ -586,23 +698,97 @@ export const Coder: React.FC = () => {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <p className="text-base text-gray-900 whitespace-pre-wrap leading-relaxed">
-                {currentTask.payload.text}
-              </p>
-            </div>
+            {currentTask.task_type === 'image' && currentTask.payload.image ? (
+              // 图片任务显示
+              <div className="space-y-3">
+                <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+                  <img
+                    src={currentTask.payload.image.drive_file_url}
+                    alt={currentTask.title}
+                    className="w-full max-h-[600px] object-contain bg-white"
+                    loading="lazy"
+                    onError={(e) => {
+                      const img = e.target as HTMLImageElement;
+                      console.error('Failed to load image:', currentTask.payload.image?.drive_file_url);
+                      
+                      // 尝试使用 CDN URL 作为备选
+                      if (currentTask.payload.image?.drive_cdn_url && img.src !== currentTask.payload.image.drive_cdn_url) {
+                        console.log('Trying CDN URL:', currentTask.payload.image.drive_cdn_url);
+                        img.src = currentTask.payload.image.drive_cdn_url;
+                      } else {
+                        // 如果 CDN 也失败，显示错误占位符
+                        img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5JbWFnZSBMb2FkIEVycm9yPC90ZXh0Pjwvc3ZnPg==';
+                      }
+                    }}
+                  />
+                </div>
+                <div className="text-xs text-gray-500 space-y-1 px-1">
+                  <p>📁 {currentTask.payload.image.original_filename}</p>
+                  <p>📊 {(currentTask.payload.image.file_size / 1024).toFixed(1)} KB</p>
+                  <p>🔗 <a href={currentTask.payload.image.drive_view_url || currentTask.payload.image.drive_file_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">View in Google Drive</a></p>
+                </div>
+              </div>
+            ) : (
+              // 文本任务显示
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <p className="text-base text-gray-900 whitespace-pre-wrap leading-relaxed">
+                  {currentTask.payload.text}
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {/* Annotation Form */}
         <Card>
           <CardHeader>
-            <CardTitle>Annotation Tags</CardTitle>
-            <CardDescription>
-              Select appropriate tags for this task. Fields marked with * are required.
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Annotation Tags</CardTitle>
+                <CardDescription>
+                  Select appropriate tags for this task. Fields marked with * are required.
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleGetAISuggestion}
+                disabled={loadingAISuggestion}
+                className="flex items-center gap-2"
+              >
+              {loadingAISuggestion ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Get AI Suggestion
+                </>
+              )}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* AI Suggestion Display */}
+            {aiSuggestion && (
+              <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200">
+                <div className="flex items-start gap-3">
+                  <Sparkles className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-semibold text-blue-900">AI Suggestion</span>
+                      <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                        Confidence: {(aiSuggestion.confidence * 100).toFixed(0)}%
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-blue-700 leading-relaxed">
+                      {aiSuggestion.reasoning}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             {tagGroups.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <AlertCircle className="h-12 w-12 mx-auto mb-2 text-gray-400" />
@@ -730,6 +916,11 @@ export const Coder: React.FC = () => {
           </CardContent>
         </Card>
       </div>
-    </PageLayout>
+
+      {/* 浮动聊天按钮 */}
+      {user?.id && user?.project_id && (
+        <ChatButton projectId={user.project_id} userId={user.id} />
+      )}
+    </ContentWrapper>
   );
 };

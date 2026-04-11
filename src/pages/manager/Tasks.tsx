@@ -5,9 +5,10 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
-import { Plus, AlertCircle, Edit, Trash2, Upload, FileSpreadsheet, FolderOpen, Loader2, CheckCircle2 } from 'lucide-react'
+import { Plus, AlertCircle, Edit, Trash2, Upload, FileSpreadsheet, FolderOpen, Loader2, CheckCircle2, Image as ImageIcon } from 'lucide-react'
 import { getToken } from '@/lib/storage'
 import { useAuth } from '@/contexts/AuthContext'
+import { ImageTaskUpload } from '@/components/tasks/ImageTaskUpload'
 
 interface Task {
   id: string
@@ -20,7 +21,7 @@ interface Task {
   createdAt: string
 }
 
-type UploadMode = 'csv' | 'folder'
+type UploadMode = 'csv' | 'folder' | 'image'
 type UploadStep = 'select' | 'column-select' | 'uploading' | 'complete'
 
 export function ManagerTasks() {
@@ -522,7 +523,7 @@ export function ManagerTasks() {
                 {/* Mode Selection */}
                 <div className="space-y-4">
                   <Label className="text-base font-medium">Select Upload Method</Label>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     {/* CSV Upload */}
                     <div
                       onClick={() => setUploadMode('csv')}
@@ -554,12 +555,39 @@ export function ManagerTasks() {
                         Upload multiple .txt files as individual tasks
                       </p>
                     </div>
+
+                    {/* Image Upload */}
+                    <div
+                      onClick={() => setUploadMode('image')}
+                      className={`cursor-pointer border-2 rounded-lg p-6 transition-all ${
+                        uploadMode === 'image'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <ImageIcon className="h-10 w-10 text-primary mb-3" />
+                      <h3 className="font-semibold text-lg mb-2">Image</h3>
+                      <p className="text-sm text-gray-500">
+                        Upload images for annotation tasks
+                      </p>
+                    </div>
                   </div>
                 </div>
 
                 {/* File Upload Section */}
                 <div className="space-y-3">
-                  {uploadMode === 'csv' ? (
+                  {uploadMode === 'image' ? (
+                    // 图片上传模式
+                    <ImageTaskUpload
+                      projectId={user.project_id}
+                      onSuccess={() => {
+                        setUploadStep('complete');
+                        setUploadResult({ success: 1, failed: 0 });
+                        fetchTasks();
+                      }}
+                      onCancel={() => setUploadDialogOpen(false)}
+                    />
+                  ) : uploadMode === 'csv' ? (
                     <>
                       <Label htmlFor="csv-upload">Upload CSV File</Label>
                       <div className="flex items-center gap-3">
@@ -631,26 +659,28 @@ export function ManagerTasks() {
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex justify-end gap-3 pt-4 border-t">
-                  <Button variant="outline" onClick={() => setUploadDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (uploadMode === 'csv' && csvFile) {
-                        // Already parsed, will show column select
-                      } else if (uploadMode === 'folder' && txtFiles.length > 0) {
-                        handleUploadFromTxt()
+                {uploadMode !== 'image' && (
+                  <div className="flex justify-end gap-3 pt-4 border-t">
+                    <Button variant="outline" onClick={() => setUploadDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        if (uploadMode === 'csv' && csvFile) {
+                          // Already parsed, will show column select
+                        } else if (uploadMode === 'folder' && txtFiles.length > 0) {
+                          handleUploadFromTxt()
+                        }
+                      }}
+                      disabled={
+                        (uploadMode === 'csv' && !csvFile) ||
+                        (uploadMode === 'folder' && txtFiles.length === 0)
                       }
-                    }}
-                    disabled={
-                      (uploadMode === 'csv' && !csvFile) ||
-                      (uploadMode === 'folder' && txtFiles.length === 0)
-                    }
-                  >
-                    {uploadMode === 'folder' ? 'Upload Tasks' : 'Continue'}
-                  </Button>
-                </div>
+                    >
+                      {uploadMode === 'folder' ? 'Upload Tasks' : 'Continue'}
+                    </Button>
+                  </div>
+                )}
               </>
             )}
 

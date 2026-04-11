@@ -89,6 +89,21 @@ export function ManagerAssignment() {
         assigned_tasks: coder.assigned_tasks || 0,
       }))
 
+      // Add current user (Manager) to the coders list so they can assign tasks to themselves
+      if (user && user.id) {
+        const managerAlreadyInList = transformedCoders.some(c => c.id === user.id)
+        if (!managerAlreadyInList) {
+          transformedCoders.unshift({
+            id: user.id,
+            name: `${user.username || user.name || 'Me'} (Manager)`,
+            email: user.email || '',
+            avatar_url: user.avatar || '',
+            assigned_tasks: 0,
+          })
+          console.log('✅ Added Manager to coders list for self-assignment')
+        }
+      }
+
       setCoders(transformedCoders)
       console.log('✅ Coders loaded:', transformedCoders.length)
 
