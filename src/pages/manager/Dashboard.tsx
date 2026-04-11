@@ -17,6 +17,9 @@ import {
   Activity,
   Loader2,
   LayoutDashboard,
+  MessageSquare,
+  Download,
+  AlertTriangle,
 } from 'lucide-react'
 import { getToken } from '@/lib/storage'
 import {
@@ -28,12 +31,19 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
+import { ReportsTab } from '@/components/reports/ReportsTab'
+import { AnalyticsTab } from '@/components/analytics/AnalyticsTab'
+import { ExportTab } from '@/components/exports/ExportTab'
+import { TeamProgressTab } from '@/components/team/TeamProgressTab'
+import { ChatPanel } from '@/components/chat/ChatPanel'
+import { useAuth } from '@/contexts/AuthContext'
 
 export function ManagerDashboard() {
   const [loading, setLoading] = useState(true)
   const [checkingProject, setCheckingProject] = useState(true)
   const [hasProject, setHasProject] = useState(false)
   const [projectId, setProjectId] = useState<string | null>(null)
+  const { user } = useAuth()
   const navigate = useNavigate()
 
   // Stats data
@@ -198,9 +208,24 @@ export function ManagerDashboard() {
 
       <Tabs defaultValue="overview" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="overview">
+            <LayoutDashboard className="h-4 w-4 mr-2" />
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="team">
+            <Users className="h-4 w-4 mr-2" />
+            Team Progress
+          </TabsTrigger>
+          <TabsTrigger value="chat">
+            <MessageSquare className="h-4 w-4 mr-2" />
+            Team Chat
+          </TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
+          <TabsTrigger value="export">
+            <Download className="h-4 w-4 mr-2" />
+            Export
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -469,54 +494,26 @@ export function ManagerDashboard() {
           </div>
         </TabsContent>
 
+        <TabsContent value="team" className="space-y-4">
+          {projectId && <TeamProgressTab projectId={projectId} />}
+        </TabsContent>
+
         <TabsContent value="analytics" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Analytics</CardTitle>
-              <CardDescription>
-                Detailed analytics and insights for your project
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {/* TODO: Add detailed analytics charts */}
-              <div className="flex items-center justify-center h-[350px]">
-                <div className="text-center">
-                  <TrendingUp className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-sm text-muted-foreground">
-                    Analytics coming soon
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Connect your data to see detailed insights
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {projectId && <AnalyticsTab projectId={projectId} />}
+        </TabsContent>
+
+        <TabsContent value="chat" className="space-y-4">
+          {projectId && user?.id && (
+            <ChatPanel projectId={projectId} userId={user.id} />
+          )}
         </TabsContent>
 
         <TabsContent value="reports" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Reports</CardTitle>
-              <CardDescription>
-                Generate and download reports for your project
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {/* TODO: Add report generation */}
-              <div className="flex items-center justify-center h-[350px]">
-                <div className="text-center">
-                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-sm text-muted-foreground">
-                    Reports coming soon
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Export your data and generate custom reports
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {projectId && <ReportsTab projectId={projectId} />}
+        </TabsContent>
+
+        <TabsContent value="export" className="space-y-4">
+          {projectId && <ExportTab projectId={projectId} />}
         </TabsContent>
       </Tabs>
     </div>

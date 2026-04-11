@@ -12,7 +12,11 @@ import { ManagerApplicants } from '@/pages/manager/Applicants';
 import { ManagerTasks } from '@/pages/manager/Tasks';
 import { ManagerAssignment } from '@/pages/manager/Assignment';
 import { ManagerDatabase } from '@/pages/manager/Database';
+import { ConsensusResolution } from '@/pages/manager/ConsensusResolution';
 import { Coder } from '@/pages/Coder';
+import { CoderLayout } from '@/pages/coder/CoderLayout';
+import { CoderProgress } from '@/pages/coder/CoderProgress';
+import { CoderConsensus } from '@/pages/coder/CoderConsensus';
 import { ApplyProject } from '@/pages/coder/ApplyProject';
 import { ApplicationPending } from '@/pages/coder/ApplicationPending';
 
@@ -56,6 +60,7 @@ function App() {
           >
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<ManagerDashboard />} />
+            <Route path="dashboard/:projectId" element={<ManagerDashboard />} />
             <Route path="tags" element={<ManagerTags />} />
             <Route path="applicants" element={<ManagerApplicants />} />
             <Route path="tasks" element={<ManagerTasks />} />
@@ -63,7 +68,7 @@ function App() {
             <Route path="database" element={<ManagerDatabase />} />
           </Route>
 
-          {/* Coder routes */}
+          {/* Coder routes - standalone pages (no layout) */}
           <Route
             path="/coder/apply"
             element={
@@ -80,14 +85,22 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* Coder routes - nested routing with layout */}
           <Route
             path="/coder"
             element={
               <ProtectedRoute requireRole="coder">
-                <Coder />
+                <CoderLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<Navigate to="tasks" replace />} />
+            <Route path="tasks" element={<Coder noLayout={true} />} />
+            <Route path="progress" element={<CoderProgress />} />
+            <Route path="consensus" element={<CoderConsensus />} />
+            <Route path="consensus/:taskId" element={<ConsensusResolution />} />
+          </Route>
 
           {/* Default route: redirect to login */}
           <Route path="/" element={<Navigate to="/login" replace />} />
