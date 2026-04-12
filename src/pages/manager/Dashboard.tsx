@@ -35,7 +35,6 @@ import { ReportsTab } from '@/components/reports/ReportsTab'
 import { AnalyticsTab } from '@/components/analytics/AnalyticsTab'
 import { ExportTab } from '@/components/exports/ExportTab'
 import { TeamProgressTab } from '@/components/team/TeamProgressTab'
-import { ChatPanel } from '@/components/chat/ChatPanel'
 import { useAuth } from '@/contexts/AuthContext'
 
 export function ManagerDashboard() {
@@ -215,10 +214,6 @@ export function ManagerDashboard() {
           <TabsTrigger value="team">
             <Users className="h-4 w-4 mr-2" />
             Team Progress
-          </TabsTrigger>
-          <TabsTrigger value="chat">
-            <MessageSquare className="h-4 w-4 mr-2" />
-            Team Chat
           </TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
@@ -500,12 +495,6 @@ export function ManagerDashboard() {
 
         <TabsContent value="analytics" className="space-y-4">
           {projectId && <AnalyticsTab projectId={projectId} />}
-        </TabsContent>
-
-        <TabsContent value="chat" className="space-y-4">
-          {projectId && user?.id && (
-            <ChatPanel projectId={projectId} userId={user.id} />
-          )}
         </TabsContent>
 
         <TabsContent value="reports" className="space-y-4">

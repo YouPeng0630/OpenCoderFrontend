@@ -12,6 +12,7 @@ import { ManagerApplicants } from '@/pages/manager/Applicants';
 import { ManagerTasks } from '@/pages/manager/Tasks';
 import { ManagerAssignment } from '@/pages/manager/Assignment';
 import { ManagerDatabase } from '@/pages/manager/Database';
+import { ManagerChat } from '@/pages/manager/Chat';
 import { ConsensusResolution } from '@/pages/manager/ConsensusResolution';
 import { Coder } from '@/pages/Coder';
 import { CoderLayout } from '@/pages/coder/CoderLayout';
@@ -65,6 +66,7 @@ function App() {
             <Route path="applicants" element={<ManagerApplicants />} />
             <Route path="tasks" element={<ManagerTasks />} />
             <Route path="assignment" element={<ManagerAssignment />} />
+            <Route path="chat" element={<ManagerChat />} />
             <Route path="database" element={<ManagerDatabase />} />
           </Route>
 
