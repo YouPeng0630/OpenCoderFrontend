@@ -31,7 +31,6 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import { ReportsTab } from '@/components/reports/ReportsTab'
 import { AnalyticsTab } from '@/components/analytics/AnalyticsTab'
 import { ExportTab } from '@/components/exports/ExportTab'
 import { TeamProgressTab } from '@/components/team/TeamProgressTab'
@@ -216,7 +215,6 @@ export function ManagerDashboard() {
             Team Progress
           </TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
-          <TabsTrigger value="reports">Reports</TabsTrigger>
           <TabsTrigger value="export">
             <Download className="h-4 w-4 mr-2" />
             Export
@@ -495,10 +493,6 @@ export function ManagerDashboard() {
 
         <TabsContent value="analytics" className="space-y-4">
           {projectId && <AnalyticsTab projectId={projectId} />}
-        </TabsContent>
-
-        <TabsContent value="reports" className="space-y-4">
-          {projectId && <ReportsTab projectId={projectId} />}
         </TabsContent>
 
         <TabsContent value="export" className="space-y-4">

@@ -11,7 +11,12 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the app
+# Vite bakes VITE_* into the bundle at build time (runtime env in compose is not enough)
+ARG VITE_API_BASE_URL=http://localhost:8000
+ARG VITE_AUTH_CALLBACK=http://localhost:5174/auth/callback
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_AUTH_CALLBACK=$VITE_AUTH_CALLBACK
+
 RUN npm run build
 
 # Production stage
@@ -31,5 +36,5 @@ COPY --from=build /app/dist ./dist
 # Expose port
 EXPOSE 5174
 
-# Start the preview server
-CMD ["npm", "run", "preview"]
+# Listen on all interfaces so the port mapping works
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"]

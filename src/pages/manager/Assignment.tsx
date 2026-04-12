@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { getToken } from '@/lib/storage'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,138 +21,170 @@ interface Task {
   created_at?: string
 }
 
+const TASKS_PAGE_SIZE = 200
+
 export function ManagerAssignment() {
   const { user } = useAuth()
   const [coders, setCoders] = useState<Coder[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
+  const [taskPage, setTaskPage] = useState(1)
+  const [taskTotal, setTaskTotal] = useState(0)
+  const [taskPages, setTaskPages] = useState(1)
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
   const [selectedCoder, setSelectedCoder] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [tasksLoading, setTasksLoading] = useState(false)
   const [assigning, setAssigning] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const codersLoadedForProjectRef = useRef<string | null>(null)
 
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (user?.project_id) {
-      fetchData()
+      setTaskPage(1)
     }
   }, [user?.project_id])
 
-  const fetchData = async () => {
+  const parseTasksPayload = (tasksData: any) => {
+    let tasksList: any[] = []
+    let total = 0
+    let pages = 1
+
+    if (Array.isArray(tasksData)) {
+      tasksList = tasksData
+      total = tasksData.length
+      pages = 1
+    } else if (tasksData.items && Array.isArray(tasksData.items)) {
+      tasksList = tasksData.items
+      total = typeof tasksData.total === 'number' ? tasksData.total : tasksList.length
+      pages = typeof tasksData.pages === 'number' ? tasksData.pages : Math.max(1, Math.ceil(total / TASKS_PAGE_SIZE))
+    } else if (tasksData.tasks && Array.isArray(tasksData.tasks)) {
+      tasksList = tasksData.tasks
+      total = tasksList.length
+    } else if (tasksData.data && Array.isArray(tasksData.data)) {
+      tasksList = tasksData.data
+      total = tasksList.length
+    }
+
+    const transformedTasks: Task[] = tasksList
+      .filter((task: any) => task.status === 'open' || task.status === 'pending')
+      .map((task: any) => ({
+        id: task.id || task._id || task.task_id || '',
+        title: task.title || task.name || 'Untitled Task',
+        status: task.status || 'open',
+        created_at: task.created_at || task.createdAt || '',
+      }))
+
+    return { transformedTasks, total, pages }
+  }
+
+  const fetchTasksPage = async (projectId: string, page: number, token: string) => {
+    const tasksResponse = await fetch(
+      `${apiBaseUrl}/api/projects/${projectId}/tasks?token=${encodeURIComponent(token)}&page=${page}&limit=${TASKS_PAGE_SIZE}&status=open`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } }
+    )
+    if (!tasksResponse.ok) {
+      throw new Error(`Failed to fetch tasks: ${tasksResponse.status}`)
+    }
+    const tasksData = await tasksResponse.json()
+    const { transformedTasks, total, pages } = parseTasksPayload(tasksData)
+    setTasks(transformedTasks)
+    setTaskTotal(total)
+    setTaskPages(Math.max(1, pages))
+    console.log('✅ Tasks loaded:', transformedTasks.length, 'page', page, 'total', total)
+  }
+
+  const fetchCoders = async () => {
+    if (!user?.project_id) return
+    const token = getToken()
+    if (!token) throw new Error('No authentication token')
+
+    const codersResponse = await fetch(
+      `${apiBaseUrl}/api/users/?role=coder&project_id=${user.project_id}&token=${encodeURIComponent(token)}`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } }
+    )
+    if (!codersResponse.ok) {
+      throw new Error(`Failed to fetch coders: ${codersResponse.status}`)
+    }
+    const codersData = await codersResponse.json()
+    let codersList: any[] = []
+    if (Array.isArray(codersData)) {
+      codersList = codersData
+    } else if (codersData.users && Array.isArray(codersData.users)) {
+      codersList = codersData.users
+    } else if (codersData.data && Array.isArray(codersData.data)) {
+      codersList = codersData.data
+    }
+
+    const transformedCoders: Coder[] = codersList.map((coder: any) => ({
+      id: coder.id || coder._id || '',
+      name: coder.name || coder.username || 'Unknown',
+      email: coder.email || '',
+      avatar_url: coder.avatar_url || coder.avatarUrl || coder.avatar || '',
+      assigned_tasks: coder.assigned_tasks || 0,
+    }))
+
+    if (user?.id) {
+      const managerAlreadyInList = transformedCoders.some((c) => c.id === user.id)
+      if (!managerAlreadyInList) {
+        transformedCoders.unshift({
+          id: user.id,
+          name: `${user.username || user.name || 'Me'} (Manager)`,
+          email: user.email || '',
+          avatar_url: user.avatar || '',
+          assigned_tasks: 0,
+        })
+      }
+    }
+    setCoders(transformedCoders)
+  }
+
+  useEffect(() => {
     if (!user?.project_id) {
-      console.log('⚠️ No project ID found')
       setLoading(false)
+      codersLoadedForProjectRef.current = null
       return
     }
 
-    try {
-      setLoading(true)
-      const token = getToken()
-      if (!token) {
-        throw new Error('No authentication token')
-      }
-
-      console.log('📡 Fetching coders and tasks...')
-
-      // Fetch coders
-      const codersResponse = await fetch(
-        `${apiBaseUrl}/api/users/?role=coder&project_id=${user.project_id}&token=${encodeURIComponent(token)}`,
-        {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
-        }
-      )
-
-      if (!codersResponse.ok) {
-        throw new Error(`Failed to fetch coders: ${codersResponse.status}`)
-      }
-
-      const codersData = await codersResponse.json()
-      console.log('👥 Coders data:', codersData)
-
-      // Parse coders data
-      let codersList: any[] = []
-      if (Array.isArray(codersData)) {
-        codersList = codersData
-      } else if (codersData.users && Array.isArray(codersData.users)) {
-        codersList = codersData.users
-      } else if (codersData.data && Array.isArray(codersData.data)) {
-        codersList = codersData.data
-      }
-
-      const transformedCoders: Coder[] = codersList.map((coder: any) => ({
-        id: coder.id || coder._id || '',
-        name: coder.name || coder.username || 'Unknown',
-        email: coder.email || '',
-        avatar_url: coder.avatar_url || coder.avatarUrl || coder.avatar || '',
-        assigned_tasks: coder.assigned_tasks || 0,
-      }))
-
-      // Add current user (Manager) to the coders list so they can assign tasks to themselves
-      if (user && user.id) {
-        const managerAlreadyInList = transformedCoders.some(c => c.id === user.id)
-        if (!managerAlreadyInList) {
-          transformedCoders.unshift({
-            id: user.id,
-            name: `${user.username || user.name || 'Me'} (Manager)`,
-            email: user.email || '',
-            avatar_url: user.avatar || '',
-            assigned_tasks: 0,
-          })
-          console.log('✅ Added Manager to coders list for self-assignment')
-        }
-      }
-
-      setCoders(transformedCoders)
-      console.log('✅ Coders loaded:', transformedCoders.length)
-
-      // Fetch tasks (pending/unassigned tasks)
-      const tasksResponse = await fetch(
-        `${apiBaseUrl}/api/projects/${user.project_id}/tasks?token=${encodeURIComponent(token)}&page=1&limit=100&status=open`,
-        {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
-        }
-      )
-
-      if (!tasksResponse.ok) {
-        throw new Error(`Failed to fetch tasks: ${tasksResponse.status}`)
-      }
-
-      const tasksData = await tasksResponse.json()
-      console.log('📋 Tasks data:', tasksData)
-
-      // Parse tasks data
-      let tasksList: any[] = []
-      if (Array.isArray(tasksData)) {
-        tasksList = tasksData
-      } else if (tasksData.tasks && Array.isArray(tasksData.tasks)) {
-        tasksList = tasksData.tasks
-      } else if (tasksData.data && Array.isArray(tasksData.data)) {
-        tasksList = tasksData.data
-      } else if (tasksData.items && Array.isArray(tasksData.items)) {
-        tasksList = tasksData.items
-      }
-
-      const transformedTasks: Task[] = tasksList
-        .filter((task: any) => task.status === 'open' || task.status === 'pending')
-        .map((task: any) => ({
-          id: task.id || task._id || task.task_id || '',
-          title: task.title || task.name || 'Untitled Task',
-          status: task.status || 'open',
-          created_at: task.created_at || task.createdAt || '',
-        }))
-
-      setTasks(transformedTasks)
-      console.log('✅ Tasks loaded:', transformedTasks.length)
-    } catch (error) {
-      console.error('❌ Failed to fetch data:', error)
-      setMessage({ type: 'error', text: 'Failed to load coders or tasks' })
-    } finally {
+    const token = getToken()
+    if (!token) {
       setLoading(false)
+      setMessage({ type: 'error', text: 'Not signed in' })
+      return
     }
-  }
+
+    const needCoders = codersLoadedForProjectRef.current !== user.project_id
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (needCoders) {
+          setLoading(true)
+          await fetchCoders()
+          if (cancelled) return
+          codersLoadedForProjectRef.current = user.project_id!
+        } else {
+          setTasksLoading(true)
+        }
+        await fetchTasksPage(user.project_id!, taskPage, token)
+      } catch (error) {
+        console.error('❌ Failed to fetch data:', error)
+        if (!cancelled) {
+          setMessage({ type: 'error', text: 'Failed to load coders or tasks' })
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+          setTasksLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user?.project_id, taskPage])
 
   const toggleTaskSelection = (taskId: string) => {
     const newSelection = new Set(selectedTasks)
@@ -164,12 +196,19 @@ export function ManagerAssignment() {
     setSelectedTasks(newSelection)
   }
 
-  const selectAllTasks = () => {
-    if (selectedTasks.size === tasks.length) {
-      setSelectedTasks(new Set())
+  const pageIds = tasks.map((t) => t.id)
+  const allOnPageSelected =
+    pageIds.length > 0 && pageIds.every((id) => selectedTasks.has(id))
+
+  const selectAllOnPage = () => {
+    if (pageIds.length === 0) return
+    const next = new Set(selectedTasks)
+    if (allOnPageSelected) {
+      pageIds.forEach((id) => next.delete(id))
     } else {
-      setSelectedTasks(new Set(tasks.map((t) => t.id)))
+      pageIds.forEach((id) => next.add(id))
     }
+    setSelectedTasks(next)
   }
 
   const handleAssign = async () => {
@@ -230,9 +269,16 @@ export function ManagerAssignment() {
       setSelectedTasks(new Set())
       setSelectedCoder(null)
 
-      // Refresh data
-      setTimeout(() => {
-        fetchData()
+      // Refresh coders (counts) and current task page
+      setTimeout(async () => {
+        try {
+          const t = getToken()
+          if (!t || !user?.project_id) return
+          await fetchCoders()
+          await fetchTasksPage(user.project_id, taskPage, t)
+        } catch (e) {
+          console.error(e)
+        }
       }, 1000)
     } catch (error) {
       console.error('❌ Assignment failed:', error)
@@ -325,37 +371,48 @@ export function ManagerAssignment() {
               <div>
                 <CardTitle>Available Tasks</CardTitle>
                 <CardDescription>
-                  {tasks.length} unassigned task(s) • {selectedTasks.size} selected
+                  {taskTotal} open total • {tasks.length} on this page • page {taskPage} of {taskPages} •{' '}
+                  {selectedTasks.size} selected
                 </CardDescription>
               </div>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={selectAllTasks}
+                onClick={selectAllOnPage}
+                disabled={tasks.length === 0}
                 className="flex items-center gap-2"
               >
-                {selectedTasks.size === tasks.length ? (
+                {allOnPageSelected ? (
                   <>
                     <Square className="h-4 w-4" />
-                    Deselect All
+                    Deselect page
                   </>
                 ) : (
                   <>
                     <CheckSquare className="h-4 w-4" />
-                    Select All
+                    Select page
                   </>
                 )}
               </Button>
             </div>
           </CardHeader>
           <CardContent>
-            {tasks.length === 0 ? (
+            {tasksLoading && tasks.length === 0 ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : tasks.length === 0 ? (
               <div className="text-center py-12">
                 <AlertCircle className="h-12 w-12 text-gray-300 mx-auto mb-3" />
                 <p className="text-gray-500 text-sm">No unassigned tasks available</p>
               </div>
             ) : (
-              <div className="space-y-2 max-h-[600px] overflow-y-auto">
+              <div className="relative space-y-2 max-h-[600px] overflow-y-auto">
+                {tasksLoading && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 rounded-lg">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                )}
                 {tasks.map((task) => (
                   <div
                     key={task.id}
@@ -388,6 +445,36 @@ export function ManagerAssignment() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+            {taskPages > 1 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-4 mt-2 border-t">
+                <p className="text-sm text-gray-500">
+                  {TASKS_PAGE_SIZE} per page · {taskTotal} open tasks total
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={taskPage <= 1 || tasksLoading}
+                    onClick={() => setTaskPage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-gray-600 tabular-nums">
+                    {taskPage} / {taskPages}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={taskPage >= taskPages || tasksLoading}
+                    onClick={() => setTaskPage((p) => Math.min(taskPages, p + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>
