@@ -42,6 +42,7 @@ export function ManagerTasks() {
   const [csvColumns, setCsvColumns] = useState<string[]>([])
   const [selectedColumn, setSelectedColumn] = useState<string>('')
   const [csvData, setCsvData] = useState<string[][]>([])
+  const [isDocumentLevel, setIsDocumentLevel] = useState(false) // Document-level upload mode
   
   // Folder upload states
   const [txtFiles, setTxtFiles] = useState<File[]>([])
@@ -168,6 +169,29 @@ export function ManagerTasks() {
     setCsvFile(null)
     setTxtFiles([])
     setUploadProgress(0)
+    setIsDocumentLevel(false) // Reset document-level mode
+  }
+
+  // Sentence segmentation function (supports English and Chinese)
+  const segmentBySentence = (text: string): string[] => {
+    if (!text || !text.trim()) return []
+    
+    // Split by English and Chinese sentence endings
+    // Captures: . ! ? 。！？ followed by optional whitespace
+    const segments = text
+      .split(/([.!?。！？]+[\s\n]*)/)
+      .reduce((acc: string[], part, i, arr) => {
+        if (i % 2 === 0 && part.trim()) {
+          // Combine text with its punctuation
+          const sentence = (part + (arr[i + 1] || '')).trim()
+          if (sentence) {
+            acc.push(sentence)
+          }
+        }
+        return acc
+      }, [])
+    
+    return segments.filter(s => s.length > 0)
   }
 
   // Parse CSV file
@@ -219,9 +243,29 @@ export function ManagerTasks() {
     const columnIndex = csvColumns.indexOf(selectedColumn)
     if (columnIndex === -1) return
 
-    const taskTexts = csvData.slice(1) // Skip header
-      .map(row => row[columnIndex])
-      .filter(text => text && text.trim())
+    let taskTexts: string[] = []
+    let totalDocuments = 0
+    let totalSegments = 0
+
+    if (isDocumentLevel) {
+      // Document-level: Split each row into multiple sentences
+      csvData.slice(1).forEach((row, rowIndex) => {
+        const text = row[columnIndex]
+        if (text && text.trim()) {
+          const segments = segmentBySentence(text)
+          taskTexts.push(...segments)
+          totalDocuments++
+          totalSegments += segments.length
+        }
+      })
+      
+      console.log(`📊 Document-level upload: ${totalDocuments} documents → ${totalSegments} sentences`)
+    } else {
+      // Sentence-level: Each row is one task (original behavior)
+      taskTexts = csvData.slice(1)
+        .map(row => row[columnIndex])
+        .filter(text => text && text.trim())
+    }
 
     await uploadTasks(taskTexts)
   }
@@ -267,6 +311,7 @@ export function ManagerTasks() {
       
       console.log('Uploading tasks to project:', user.project_id)
       console.log('Total tasks:', taskTexts.length)
+      console.log('Upload mode:', isDocumentLevel ? 'Document-level' : 'Sentence-level')
 
       // Build tasks array according to API format
       const tasks = taskTexts.map((text, index) => ({
@@ -276,7 +321,9 @@ export function ManagerTasks() {
           meta: {
             source: uploadMode === 'csv' ? 'csv_upload' : 'txt_upload',
             upload_date: new Date().toISOString(),
-            index: index + 1
+            index: index + 1,
+            is_document_level: isDocumentLevel,
+            segmentation_method: isDocumentLevel ? 'sentence' : null
           }
         },
         tags: [],
@@ -491,9 +538,12 @@ export function ManagerTasks() {
 
       {/* Upload Dialog */}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl" aria-describedby="upload-dialog-description">
           <DialogHeader>
             <DialogTitle>Batch Upload Tasks</DialogTitle>
+            <p id="upload-dialog-description" className="sr-only">
+              Upload tasks from CSV, text files, or images
+            </p>
           </DialogHeader>
 
           {/* Debug Info */}
@@ -714,9 +764,80 @@ export function ManagerTasks() {
                     ))}
                   </div>
 
+                  {/* Upload Mode Selection */}
+                  <div className="space-y-3 p-4 border-2 border-blue-200 rounded-lg bg-blue-50">
+                    <Label className="text-base font-medium">Upload Mode</Label>
+                    
+                    <div className="space-y-2">
+                      <div
+                        onClick={() => setIsDocumentLevel(false)}
+                        className={`cursor-pointer border-2 rounded-lg p-3 transition-all ${
+                          !isDocumentLevel 
+                            ? 'border-primary bg-white shadow-sm' 
+                            : 'border-gray-300 bg-white hover:border-gray-400'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="radio"
+                            checked={!isDocumentLevel}
+                            onChange={() => setIsDocumentLevel(false)}
+                            className="mt-1 h-4 w-4"
+                          />
+                          <div className="flex-1">
+                            <p className="font-semibold text-gray-900">Sentence-level</p>
+                            <p className="text-sm text-gray-600 mt-1">
+                              Each row = 1 task (no segmentation needed)
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              ✓ Best for: Data already split into sentences
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        onClick={() => setIsDocumentLevel(true)}
+                        className={`cursor-pointer border-2 rounded-lg p-3 transition-all ${
+                          isDocumentLevel 
+                            ? 'border-primary bg-white shadow-sm' 
+                            : 'border-gray-300 bg-white hover:border-gray-400'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="radio"
+                            checked={isDocumentLevel}
+                            onChange={() => setIsDocumentLevel(true)}
+                            className="mt-1 h-4 w-4"
+                          />
+                          <div className="flex-1">
+                            <p className="font-semibold text-gray-900">Document-level</p>
+                            <p className="text-sm text-gray-600 mt-1">
+                              Each row = 1 document → Auto-split into multiple sentence tasks
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              ✓ Best for: Paragraphs, long text that needs sentence segmentation
+                            </p>
+                            <p className="text-xs text-blue-600 font-medium mt-2">
+                              Segmentation: By sentence endings (. ! ? 。！？)
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-sm text-blue-800">
-                      <strong>Preview:</strong> {csvData.length - 1} tasks will be created
+                      <strong>Preview:</strong> {csvData.length - 1} row(s) →{' '}
+                      {isDocumentLevel ? (
+                        <span className="font-bold">
+                          Multiple tasks (depends on sentence count)
+                        </span>
+                      ) : (
+                        <span className="font-bold">{csvData.length - 1} task(s)</span>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -726,7 +847,7 @@ export function ManagerTasks() {
                     Back
                   </Button>
                   <Button onClick={handleUploadFromCsv} disabled={!selectedColumn}>
-                    Upload Tasks
+                    {isDocumentLevel ? 'Split & Upload Tasks' : 'Upload Tasks'}
                   </Button>
                 </div>
               </>
@@ -737,8 +858,14 @@ export function ManagerTasks() {
               <div className="space-y-6 py-8">
                 <div className="text-center">
                   <Loader2 className="h-16 w-16 animate-spin text-primary mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">Uploading Tasks...</h3>
-                  <p className="text-sm text-gray-500">Please wait while we create your tasks</p>
+                  <h3 className="text-lg font-semibold mb-2">
+                    {isDocumentLevel ? 'Splitting & Uploading Tasks...' : 'Uploading Tasks...'}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {isDocumentLevel 
+                      ? 'Segmenting documents into sentences and creating tasks'
+                      : 'Please wait while we create your tasks'}
+                  </p>
                 </div>
 
                 <div className="space-y-2">

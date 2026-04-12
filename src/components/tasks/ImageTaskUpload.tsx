@@ -108,7 +108,15 @@ export function ImageTaskUpload({ projectId, onSuccess, onCancel }: ImageTaskUpl
       
     } catch (error: any) {
       console.error('Upload error:', error);
-      setError(error.message || 'Failed to upload image task. Please try again.');
+      
+      const errorMessage = error.message || 'Failed to upload image task. Please try again.';
+      
+      // 检查是否是 Google 凭证问题
+      if (errorMessage.includes('credentials') || errorMessage.includes('Drive access')) {
+        setError(`🔐 Google Drive Authorization Required\n\n${errorMessage}\n\n📝 Steps to fix:\n1. Click your profile icon (top right)\n2. Select "Sign out"\n3. Visit: https://myaccount.google.com/permissions\n4. Remove "OpenCoder" access\n5. Login again with Google\n6. Grant Google Drive permission`);
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setUploading(false);
     }
@@ -205,8 +213,19 @@ export function ImageTaskUpload({ projectId, onSuccess, onCancel }: ImageTaskUpl
 
         {/* 错误提示 */}
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm text-red-600">{error}</p>
+          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-800 font-medium mb-2">⚠️ Upload Failed</p>
+            <div className="text-sm text-red-700 whitespace-pre-wrap">{error}</div>
+            {error.includes('credentials') && (
+              <a
+                href="https://myaccount.google.com/permissions"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-3 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 transition-colors"
+              >
+                Open Google Permissions →
+              </a>
+            )}
           </div>
         )}
 
