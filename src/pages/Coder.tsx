@@ -28,6 +28,7 @@ interface Task {
   payload: {
     text?: string;
     image?: {
+      drive_file_id?: string;
       drive_file_url: string;
       drive_cdn_url?: string;  // Google CDN URL (备选，更快)
       drive_view_url?: string;
@@ -68,6 +69,78 @@ interface TagGroup {
 
 interface CoderProps {
   noLayout?: boolean;  // Optional prop to skip PageLayout wrapper
+}
+
+/** Google Drive file id for /preview embed (same file as drive_file_url / drive_view_url). */
+function getDriveFileIdForEmbed(image: NonNullable<Task['payload']['image']>): string | null {
+  if (image.drive_file_id?.trim()) return image.drive_file_id.trim();
+  const view = image.drive_view_url;
+  const fromView = view?.match(/\/file\/d\/([^/]+)/)?.[1];
+  if (fromView) return fromView;
+  const u = image.drive_file_url;
+  const fromQuery = u?.match(/[?&]id=([^&]+)/)?.[1];
+  if (fromQuery) return decodeURIComponent(fromQuery);
+  return null;
+}
+
+/** True when payload carries image fields (covers next_task missing task_type after submit-and-next). */
+function getPayloadImage(task: Task | null): NonNullable<Task['payload']['image']> | null {
+  const img = task?.payload?.image;
+  if (!img || typeof img !== 'object') return null;
+  const anyImg = img as Record<string, unknown>;
+  if (
+    (typeof anyImg.drive_file_url === 'string' && anyImg.drive_file_url.trim()) ||
+    (typeof anyImg.drive_file_id === 'string' && anyImg.drive_file_id.trim()) ||
+    (typeof anyImg.drive_view_url === 'string' && anyImg.drive_view_url.trim()) ||
+    (typeof anyImg.drive_cdn_url === 'string' && anyImg.drive_cdn_url.trim())
+  ) {
+    return img as NonNullable<Task['payload']['image']>;
+  }
+  return null;
+}
+
+/**
+ * URLs to try for <img src>. Order matters:
+ * - uc?export=view often returns HTML (virus scan / consent), so it fails as image — put it late.
+ * - lh3 + Drive thumbnail API usually return real image bytes for link-shared files.
+ */
+function getImageSrcCandidates(image: NonNullable<Task['payload']['image']>): string[] {
+  const id = getDriveFileIdForEmbed(image);
+  const out: string[] = [];
+  const add = (u?: string | null) => {
+    const t = typeof u === 'string' ? u.trim() : '';
+    if (t && !out.includes(t)) out.push(t);
+  };
+
+  add(image.drive_cdn_url);
+  if (id) add(`https://lh3.googleusercontent.com/d/${id}`);
+  add(image.drive_thumbnail_url);
+  add(image.drive_file_url);
+  if (id) {
+    add(`https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w2000`);
+    add(`https://drive.google.com/uc?export=view&id=${encodeURIComponent(id)}`);
+    add(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`);
+  }
+  return out;
+}
+
+function mapApiTaskToTask(task: Record<string, any>): Task {
+  const payload = task.payload || { text: '' };
+  const inferredImage =
+    payload.image && typeof payload.image === 'object' && Object.keys(payload.image).length > 0;
+  const taskType =
+    task.task_type ||
+    task.taskType ||
+    (inferredImage ? 'image' : 'text');
+  return {
+    id: task._id || task.id,
+    title: task.title || 'Untitled Task',
+    task_type: taskType as Task['task_type'],
+    payload,
+    status: task.status || 'in_progress',
+    tags: task.tags || {},
+    created_at: task.created_at || task.createdAt || new Date().toISOString(),
+  };
 }
 
 export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
@@ -262,15 +335,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       // Transform task
       const task = data.task;
       if (task) {
-        const transformedTask: Task = {
-          id: task._id || task.id,
-          title: task.title || 'Untitled Task',
-          task_type: task.task_type || 'text',
-          payload: task.payload || { text: '' },
-          status: task.status || 'in_progress',
-          tags: task.tags || {},
-          created_at: task.created_at || task.createdAt || new Date().toISOString(),
-        };
+        const transformedTask = mapApiTaskToTask(task);
         setCurrentTask(transformedTask);
         setSelectedTags({});  // Reset tags for new task
         console.log('✅ Current task loaded:', transformedTask.id, 'type:', transformedTask.task_type);
@@ -583,14 +648,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
         setTimeout(() => {
           const nextTask = result.next_task.task;
           if (nextTask) {
-            const transformedTask: Task = {
-              id: nextTask._id || nextTask.id,
-              title: nextTask.title || 'Untitled Task',
-              payload: nextTask.payload || { text: '' },
-              status: nextTask.status || 'in_progress',
-              tags: nextTask.tags || {},
-              created_at: nextTask.created_at || nextTask.createdAt || new Date().toISOString(),
-            };
+            const transformedTask = mapApiTaskToTask(nextTask);
             setCurrentTask(transformedTask);
             setTagGroups(result.next_task.tag_groups || []);
             setSelectedTags({});
@@ -698,41 +756,88 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
             </div>
           </CardHeader>
           <CardContent>
-            {currentTask.task_type === 'image' && currentTask.payload.image ? (
-              // 图片任务显示
+            {getPayloadImage(currentTask) ? (() => {
+              const imgPayload = getPayloadImage(currentTask)!;
+              const fileId = getDriveFileIdForEmbed(imgPayload);
+              const driveHref =
+                imgPayload.drive_view_url ||
+                imgPayload.drive_file_url ||
+                (fileId ? `https://drive.google.com/file/d/${fileId}/view` : '');
+              const srcCandidates = getImageSrcCandidates(imgPayload);
+              const primarySrc = srcCandidates[0] ?? null;
+
+              return (
               <div className="space-y-3">
-                <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
-                  <img
-                    src={currentTask.payload.image.drive_file_url}
-                    alt={currentTask.title}
-                    className="w-full max-h-[600px] object-contain bg-white"
-                    loading="lazy"
-                    onError={(e) => {
-                      const img = e.target as HTMLImageElement;
-                      console.error('Failed to load image:', currentTask.payload.image?.drive_file_url);
-                      
-                      // 尝试使用 CDN URL 作为备选
-                      if (currentTask.payload.image?.drive_cdn_url && img.src !== currentTask.payload.image.drive_cdn_url) {
-                        console.log('Trying CDN URL:', currentTask.payload.image.drive_cdn_url);
-                        img.src = currentTask.payload.image.drive_cdn_url;
-                      } else {
-                        // 如果 CDN 也失败，显示错误占位符
-                        img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5JbWFnZSBMb2FkIEVycm9yPC90ZXh0Pjwvc3ZnPg==';
-                      }
-                    }}
-                  />
+                <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden flex flex-col items-center justify-center min-h-[200px]">
+                  {!primarySrc ? (
+                    <p className="text-sm text-gray-500 p-6 text-center">
+                      No image URL in task payload.
+                      {driveHref ? (
+                        <>
+                          {' '}
+                          <a
+                            href={driveHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 underline"
+                          >
+                            Open in Google Drive
+                          </a>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : (
+                    <img
+                      src={primarySrc}
+                      alt={currentTask.title}
+                      className="w-full max-h-[min(70vh,640px)] object-contain bg-white"
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      data-candidate-idx="0"
+                      onError={(e) => {
+                        const el = e.target as HTMLImageElement;
+                        let idx = parseInt(el.getAttribute('data-candidate-idx') || '0', 10);
+                        console.warn('Image src failed, trying next candidate:', el.src);
+                        idx += 1;
+                        if (idx < srcCandidates.length) {
+                          el.setAttribute('data-candidate-idx', String(idx));
+                          el.src = srcCandidates[idx];
+                          return;
+                        }
+                        el.src =
+                          'data:image/svg+xml,' +
+                          encodeURIComponent(
+                            '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect fill="#eee" width="200" height="200"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-size="14" font-family="Arial">Image load error</text></svg>'
+                          );
+                      }}
+                    />
+                  )}
                 </div>
                 <div className="text-xs text-gray-500 space-y-1 px-1">
-                  <p>📁 {currentTask.payload.image.original_filename}</p>
-                  <p>📊 {(currentTask.payload.image.file_size / 1024).toFixed(1)} KB</p>
-                  <p>🔗 <a href={currentTask.payload.image.drive_view_url || currentTask.payload.image.drive_file_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">View in Google Drive</a></p>
+                  {imgPayload.original_filename ? <p>📁 {imgPayload.original_filename}</p> : null}
+                  {typeof imgPayload.file_size === 'number' ? (
+                    <p>📊 {(imgPayload.file_size / 1024).toFixed(1)} KB</p>
+                  ) : null}
+                  {driveHref ? (
+                    <p>
+                      🔗{' '}
+                      <a
+                        href={driveHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-500 hover:underline"
+                      >
+                        View in Google Drive
+                      </a>
+                    </p>
+                  ) : null}
                 </div>
               </div>
-            ) : (
-              // 文本任务显示
+              );
+            })() : (
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                 <p className="text-base text-gray-900 whitespace-pre-wrap leading-relaxed">
-                  {currentTask.payload.text}
+                  {currentTask.payload.text ?? ''}
                 </p>
               </div>
             )}
