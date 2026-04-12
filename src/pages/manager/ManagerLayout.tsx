@@ -16,7 +16,12 @@ import {
   Code,
   Settings,
   TrendingUp,
-  AlertTriangle
+  AlertTriangle,
+  UploadCloud,
+  BookOpen,
+  MessageSquare,
+  FolderKanban,
+  MoreHorizontal
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Avatar from '@radix-ui/react-avatar'
@@ -29,16 +34,25 @@ import { NotificationBell } from '@/components/notifications/NotificationBell'
 export function ManagerLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mode, setMode] = useState<'manager' | 'coder'>('manager')
+  const [assignmentsOpen, setAssignmentsOpen] = useState(true)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
   const navigation = [
+    { name: 'Data Upload', href: '/project-manager/tasks', icon: UploadCloud },
+    { name: 'Code Book', href: '/project-manager/tags', icon: BookOpen },
+    { 
+      name: 'Assignments', 
+      icon: FolderKanban, 
+      isDropdown: true,
+      children: [
+        { name: 'Coder Assignment', href: '/project-manager/applicants', icon: Users },
+        { name: 'Task Assignment', href: '/project-manager/assignment', icon: UserCheck },
+      ]
+    },
     { name: 'Dashboard', href: '/project-manager/dashboard', icon: LayoutDashboard },
-    { name: 'Tags', href: '/project-manager/tags', icon: Tags },
-    { name: 'Applicants', href: '/project-manager/applicants', icon: Users },
-    { name: 'Tasks', href: '/project-manager/tasks', icon: CheckSquare },
-    { name: 'Assignment', href: '/project-manager/assignment', icon: UserCheck },
-    { name: 'Database', href: '/project-manager/database', icon: Database },
+    { name: 'Team Chat', href: '/project-manager/chat', icon: MessageSquare },
+    { name: 'Others', href: '/project-manager/database', icon: MoreHorizontal },
   ]
 
   const coderNavigation = [
@@ -70,6 +84,52 @@ export function ManagerLayout() {
           <nav className="flex-1 px-2 py-4 space-y-1">
             {navigation.map((item) => {
               const Icon = item.icon
+              
+              // 如果是下拉菜单
+              if (item.isDropdown && item.children) {
+                return (
+                  <div key={item.name} className="space-y-1">
+                    <button
+                      onClick={() => setAssignmentsOpen(!assignmentsOpen)}
+                      className="w-full group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                    >
+                      <div className="flex items-center">
+                        <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                        {item.name}
+                      </div>
+                      <ChevronDown 
+                        className={`h-4 w-4 transition-transform ${assignmentsOpen ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+                    
+                    {assignmentsOpen && (
+                      <div className="ml-4 space-y-1">
+                        {item.children.map((child) => {
+                          const ChildIcon = child.icon
+                          return (
+                            <NavLink
+                              key={child.name}
+                              to={child.href}
+                              className={({ isActive }) =>
+                                `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                                  isActive
+                                    ? 'bg-primary text-white'
+                                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                }`
+                              }
+                            >
+                              <ChildIcon className="mr-3 h-4 w-4 flex-shrink-0" />
+                              {child.name}
+                            </NavLink>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+              
+              // 普通菜单项
               return (
                 <NavLink
                   key={item.name}
@@ -205,6 +265,53 @@ export function ManagerLayout() {
               <nav className="mt-5 px-2 space-y-1">
                 {navigation.map((item) => {
                   const Icon = item.icon
+                  
+                  // 如果是下拉菜单
+                  if (item.isDropdown && item.children) {
+                    return (
+                      <div key={item.name} className="space-y-1">
+                        <button
+                          onClick={() => setAssignmentsOpen(!assignmentsOpen)}
+                          className="w-full group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:bg-gray-100 hover:text-gray-900"
+                        >
+                          <div className="flex items-center">
+                            <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                            {item.name}
+                          </div>
+                          <ChevronDown 
+                            className={`h-4 w-4 transition-transform ${assignmentsOpen ? 'rotate-180' : ''}`}
+                          />
+                        </button>
+                        
+                        {assignmentsOpen && (
+                          <div className="ml-4 space-y-1">
+                            {item.children.map((child) => {
+                              const ChildIcon = child.icon
+                              return (
+                                <NavLink
+                                  key={child.name}
+                                  to={child.href}
+                                  onClick={() => setSidebarOpen(false)}
+                                  className={({ isActive }) =>
+                                    `group flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                                      isActive
+                                        ? 'bg-primary text-white'
+                                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                                    }`
+                                  }
+                                >
+                                  <ChildIcon className="mr-3 h-4 w-4 flex-shrink-0" />
+                                  {child.name}
+                                </NavLink>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }
+                  
+                  // 普通菜单项
                   return (
                     <NavLink
                       key={item.name}
