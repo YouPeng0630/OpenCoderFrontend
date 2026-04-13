@@ -22,6 +22,59 @@ import {
 import { getToken } from '@/lib/storage';
 import { useAuth } from '@/contexts/AuthContext';
 
+/** Google Drive file id for /preview embed (same file as drive_file_url / drive_view_url). */
+function getDriveFileIdForEmbed(image: NonNullable<ConflictDetail['task']['payload']['image']>): string | null {
+  if (image.drive_file_id?.trim()) return image.drive_file_id.trim();
+  const view = image.drive_view_url;
+  const fromView = view?.match(/\/file\/d\/([^/]+)/)?.[1];
+  if (fromView) return fromView;
+  const u = image.drive_file_url;
+  const fromQuery = u?.match(/[?&]id=([^&]+)/)?.[1];
+  if (fromQuery) return decodeURIComponent(fromQuery);
+  return null;
+}
+
+/**
+ * URLs to try for <img src>. Order matters:
+ * - uc?export=view often returns HTML (virus scan / consent), so it fails as image — put it late.
+ * - lh3 + Drive thumbnail API usually return real image bytes for link-shared files.
+ */
+function getImageSrcCandidates(image: NonNullable<ConflictDetail['task']['payload']['image']>): string[] {
+  const id = getDriveFileIdForEmbed(image);
+  const out: string[] = [];
+  const add = (u?: string | null) => {
+    const t = typeof u === 'string' ? u.trim() : '';
+    if (t && !out.includes(t)) out.push(t);
+  };
+
+  add(image.drive_cdn_url);
+  if (id) add(`https://lh3.googleusercontent.com/d/${id}`);
+  add(image.drive_thumbnail_url);
+  add(image.drive_file_url);
+  if (id) {
+    add(`https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w2000`);
+    add(`https://drive.google.com/uc?export=view&id=${encodeURIComponent(id)}`);
+    add(`https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}`);
+  }
+  return out;
+}
+
+/** True when payload carries image fields. */
+function getPayloadImage(payload: ConflictDetail['task']['payload']): NonNullable<ConflictDetail['task']['payload']['image']> | null {
+  const img = payload?.image;
+  if (!img || typeof img !== 'object') return null;
+  const anyImg = img as Record<string, unknown>;
+  if (
+    (typeof anyImg.drive_file_url === 'string' && anyImg.drive_file_url.trim()) ||
+    (typeof anyImg.drive_file_id === 'string' && anyImg.drive_file_id.trim()) ||
+    (typeof anyImg.drive_view_url === 'string' && anyImg.drive_view_url.trim()) ||
+    (typeof anyImg.drive_cdn_url === 'string' && anyImg.drive_cdn_url.trim())
+  ) {
+    return img as NonNullable<ConflictDetail['task']['payload']['image']>;
+  }
+  return null;
+}
+
 interface Annotation {
   annotation_id: string;
   coder_id: string;
@@ -51,6 +104,16 @@ interface ConflictDetail {
       text?: string;
       url?: string;
       image_url?: string;
+      image?: {
+        drive_file_id?: string;
+        drive_file_url: string;
+        drive_cdn_url?: string;
+        drive_view_url?: string;
+        drive_thumbnail_url?: string;
+        original_filename: string;
+        file_size: number;
+        mime_type: string;
+      };
     };
   };
   tag_groups: Record<string, TagGroup>;
@@ -283,7 +346,11 @@ export function ConsensusResolution() {
       <div className="flex items-center justify-between">
         <Button
           variant="ghost"
-          onClick={() => navigate(`/coder/consensus`)}
+          onClick={() => {
+            const isManagerMode = user?.role === 'project-manager';
+            const returnPath = isManagerMode ? '/project-manager/dashboard' : '/coder/consensus';
+            navigate(returnPath);
+          }}
           className="flex items-center gap-2"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -339,7 +406,87 @@ export function ConsensusResolution() {
               </a>
             </div>
           )}
-          {detail.task.payload.image_url && (
+          {getPayloadImage(detail.task.payload) ? (() => {
+            const imgPayload = getPayloadImage(detail.task.payload)!;
+            const fileId = getDriveFileIdForEmbed(imgPayload);
+            const driveHref =
+              imgPayload.drive_view_url ||
+              imgPayload.drive_file_url ||
+              (fileId ? `https://drive.google.com/file/d/${fileId}/view` : '');
+            const srcCandidates = getImageSrcCandidates(imgPayload);
+            const primarySrc = srcCandidates[0] ?? null;
+
+            return (
+              <div className="space-y-3">
+                <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden flex flex-col items-center justify-center min-h-[200px]">
+                  {!primarySrc ? (
+                    <p className="text-sm text-gray-500 p-6 text-center">
+                      No image URL in task payload.
+                      {driveHref ? (
+                        <>
+                          {' '}
+                          <a
+                            href={driveHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 underline"
+                          >
+                            Open in Google Drive
+                          </a>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : (
+                    <img
+                      src={primarySrc}
+                      alt={detail.task.title}
+                      className="w-full max-h-[min(70vh,640px)] object-contain bg-white"
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      data-candidate-idx="0"
+                      onError={(e) => {
+                        const el = e.target as HTMLImageElement;
+                        let idx = parseInt(el.getAttribute('data-candidate-idx') || '0', 10);
+                        console.warn('Image src failed, trying next candidate:', el.src);
+                        idx += 1;
+                        if (idx < srcCandidates.length) {
+                          el.setAttribute('data-candidate-idx', String(idx));
+                          el.src = srcCandidates[idx];
+                          return;
+                        }
+                        el.src =
+                          'data:image/svg+xml,' +
+                          encodeURIComponent(
+                            '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect fill="#eee" width="200" height="200"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-size="14" font-family="Arial">Image load error</text></svg>'
+                          );
+                      }}
+                    />
+                  )}
+                </div>
+                <div className="text-xs text-gray-500 space-y-1 px-1">
+                  {imgPayload.original_filename ? <p>📁 {imgPayload.original_filename}</p> : null}
+                  {typeof imgPayload.file_size === 'number' ? (
+                    <p>📊 {(imgPayload.file_size / 1024).toFixed(1)} KB</p>
+                  ) : null}
+                  {driveHref ? (
+                    <p>
+                      🔗{' '}
+                      <a
+                        href={driveHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-500 hover:underline"
+                      >
+                        View in Google Drive
+                      </a>
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })() : null}
+          {/* Fallback to old image_url if image object not present */}
+          {!getPayloadImage(detail.task.payload) && detail.task.payload.image_url && (
             <div>
               <img
                 src={detail.task.payload.image_url}
