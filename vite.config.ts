@@ -14,6 +14,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5174,
     strictPort: true,
+    allowedHosts: ['opencoderfrontend-bbrp.onrender.com', '.onrender.com'],
   },
   server: {
     host: '0.0.0.0',
