@@ -413,7 +413,7 @@ export function ManagerLayout() {
           <div className="flex-1 px-4 flex justify-between items-center">
             <div className="flex-1">
               <h1 className="text-2xl font-semibold text-gray-900">
-                {mode === 'coder' ? 'Coder Mode' : ''}
+                {mode === 'coder' ? 'Coder Mode' : 'Manager'}
               </h1>
             </div>
 
