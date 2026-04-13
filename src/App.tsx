@@ -73,6 +73,7 @@ function App() {
             <Route path="assignment" element={<ManagerAssignment />} />
             <Route path="chat" element={<ManagerChat />} />
             <Route path="database" element={<ManagerDatabase />} />
+            <Route path="consensus/:taskId" element={<ConsensusResolution />} />
           </Route>
 
           {/* Coder routes - standalone pages (no layout) */}
