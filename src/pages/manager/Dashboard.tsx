@@ -73,7 +73,7 @@ export function ManagerDashboard() {
   } | null>(null)
 
   // Chart data for task completion over time
-  const [taskChartData] = useState([
+  const [taskChartData, setTaskChartData] = useState([
     { name: 'Mon', tasks: 0 },
     { name: 'Tue', tasks: 0 },
     { name: 'Wed', tasks: 0 },
@@ -113,12 +113,15 @@ export function ManagerDashboard() {
           
           // Fetch project overview and coders data from API (parallel requests)
           try {
-            const [overviewResponse, codersResponse] = await Promise.all([
+            const [overviewResponse, codersResponse, teamStatsResponse] = await Promise.all([
               fetch(
                 `${apiBaseUrl}/api/dashboard/${user.project_id}/overview?days=7&token=${encodeURIComponent(token)}`
               ),
               fetch(
                 `${apiBaseUrl}/api/dashboard/${user.project_id}/coders?token=${encodeURIComponent(token)}`
+              ),
+              fetch(
+                `${apiBaseUrl}/api/dashboard/${user.project_id}/team?days=7&token=${encodeURIComponent(token)}`
               ),
             ])
             
@@ -136,6 +139,30 @@ export function ManagerDashboard() {
               activeAnnotatorsCount = codersData.total_coders || 0
             } else {
               console.warn('Failed to fetch coders data, using default value')
+            }
+            
+            // Process team daily stats for chart
+            if (teamStatsResponse.ok) {
+              const teamData = await teamStatsResponse.json()
+              if (teamData.daily_stats && teamData.daily_stats.length > 0) {
+                // Get last 7 days of data
+                const last7Days = teamData.daily_stats.slice(-7)
+                
+                // Map to chart data with day names
+                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+                const chartData = last7Days.map((day: any) => {
+                  const date = new Date(day.date)
+                  const dayName = dayNames[date.getDay()]
+                  return {
+                    name: dayName,
+                    tasks: day.tasks_completed_count || 0
+                  }
+                })
+                
+                setTaskChartData(chartData)
+              }
+            } else {
+              console.warn('Failed to fetch team stats, using default chart data')
             }
             
             // Update stats from real data
