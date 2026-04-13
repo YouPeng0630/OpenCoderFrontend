@@ -130,7 +130,7 @@ export function ManagerAssignment() {
       if (!managerAlreadyInList) {
         transformedCoders.unshift({
           id: user.id,
-          name: `${user.username || user.name || 'Me'} (Manager)`,
+          name: `${(user as any).username || (user as any).name || 'Me'} (Manager)`,
           email: user.email || '',
           avatar_url: user.avatar || '',
           assigned_tasks: 0,
