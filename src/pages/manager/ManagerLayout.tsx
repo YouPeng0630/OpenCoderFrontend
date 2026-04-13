@@ -148,26 +148,6 @@ export function ManagerLayout() {
               )
             })}
           </nav>
-
-          {/* User info at bottom */}
-          <div className="flex-shrink-0 border-t border-gray-200 p-4">
-            <div className="flex items-center">
-              <Avatar.Root className="h-8 w-8">
-                <Avatar.Image
-                  src={user?.avatar}
-                  alt={user?.username}
-                  className="h-full w-full rounded-full object-cover"
-                />
-                <Avatar.Fallback className="h-full w-full rounded-full bg-primary text-white flex items-center justify-center text-sm font-medium">
-                  {user?.username?.[0]?.toUpperCase()}
-                </Avatar.Fallback>
-              </Avatar.Root>
-              <div className="ml-3 flex-1">
-                <p className="text-sm font-medium text-gray-700">{user?.username}</p>
-                <p className="text-xs text-gray-500">{user?.email}</p>
-              </div>
-            </div>
-          </div>
         </div>
       </aside>
       )}
@@ -211,26 +191,6 @@ export function ManagerLayout() {
               )
             })}
           </nav>
-
-          {/* User info at bottom */}
-          <div className="flex-shrink-0 border-t border-gray-200 p-4">
-            <div className="flex items-center">
-              <Avatar.Root className="h-8 w-8">
-                <Avatar.Image
-                  src={user?.avatar}
-                  alt={user?.username}
-                  className="h-full w-full rounded-full object-cover"
-                />
-                <Avatar.Fallback className="h-full w-full rounded-full bg-primary text-white flex items-center justify-center text-sm font-medium">
-                  {user?.username?.[0]?.toUpperCase()}
-                </Avatar.Fallback>
-              </Avatar.Root>
-              <div className="ml-3 flex-1">
-                <p className="text-sm font-medium text-gray-700">{user?.username}</p>
-                <p className="text-xs text-gray-500">{user?.email}</p>
-              </div>
-            </div>
-          </div>
         </div>
       </aside>
       )}
