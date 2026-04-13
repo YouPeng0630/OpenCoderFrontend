@@ -20,6 +20,7 @@ import {
   MessageSquare,
   Download,
   AlertTriangle,
+  Sparkles,
 } from 'lucide-react'
 import { getToken } from '@/lib/storage'
 import {
@@ -34,6 +35,7 @@ import {
 import { AnalyticsTab } from '@/components/analytics/AnalyticsTab'
 import { ExportTab } from '@/components/exports/ExportTab'
 import { TeamProgressTab } from '@/components/team/TeamProgressTab'
+import { ReportsTab } from '@/components/reports/ReportsTab'
 import { useAuth } from '@/contexts/AuthContext'
 
 export function ManagerDashboard() {
@@ -242,6 +244,10 @@ export function ManagerDashboard() {
             Team Progress
           </TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
+          <TabsTrigger value="reports">
+            <Sparkles className="h-4 w-4 mr-2" />
+            Reports
+          </TabsTrigger>
           <TabsTrigger value="export">
             <Download className="h-4 w-4 mr-2" />
             Export
@@ -520,6 +526,10 @@ export function ManagerDashboard() {
 
         <TabsContent value="analytics" className="space-y-4">
           {projectId && <AnalyticsTab projectId={projectId} />}
+        </TabsContent>
+
+        <TabsContent value="reports" className="space-y-4">
+          {projectId && <ReportsTab projectId={projectId} />}
         </TabsContent>
 
         <TabsContent value="export" className="space-y-4">
