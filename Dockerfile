@@ -36,5 +36,8 @@ COPY --from=build /app/dist ./dist
 # Expose port
 EXPOSE 5174
 
+# Set environment variable to disable host check
+ENV VITE_HOST_CHECK=false
+
 # Listen on all interfaces so the port mapping works
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"]
+CMD ["npm", "run", "preview"]
