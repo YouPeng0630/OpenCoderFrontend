@@ -4,7 +4,13 @@ import { getToken } from '@/lib/storage'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { UserPlus, Loader2, CheckSquare, Square, AlertCircle, Send } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { UserPlus, Loader2, CheckSquare, Square, AlertCircle, Send, ChevronDown } from 'lucide-react'
 
 interface Coder {
   id: string
@@ -211,6 +217,53 @@ export function ManagerAssignment() {
     setSelectedTasks(next)
   }
 
+  // 按比例选择任务（从所有可用任务中）
+  const selectByRatio = async (ratio: number) => {
+    if (taskTotal === 0) return
+    
+    try {
+      setTasksLoading(true)
+      const token = getToken()
+      if (!token || !user?.project_id) return
+      
+      // 计算需要选择的任务数
+      const targetCount = Math.ceil(taskTotal * ratio)
+      
+      // 获取所有页的任务
+      const allTasks: Task[] = []
+      for (let page = 1; page <= taskPages; page++) {
+        const response = await fetch(
+          `${apiBaseUrl}/api/projects/${user.project_id}/tasks?token=${encodeURIComponent(token)}&page=${page}&limit=${TASKS_PAGE_SIZE}&status=open`,
+          { method: 'GET', headers: { 'Content-Type': 'application/json' } }
+        )
+        if (!response.ok) continue
+        
+        const data = await response.json()
+        const { transformedTasks } = parseTasksPayload(data)
+        allTasks.push(...transformedTasks)
+      }
+      
+      // 随机选择指定数量的任务
+      const shuffled = [...allTasks].sort(() => Math.random() - 0.5)
+      const selected = new Set<string>()
+      shuffled.slice(0, targetCount).forEach((task) => selected.add(task.id))
+      
+      setSelectedTasks(selected)
+      setMessage({
+        type: 'success',
+        text: `Selected ${selected.size} task(s) (${(ratio * 100).toFixed(0)}% of ${taskTotal} total available tasks)`,
+      })
+    } catch (error) {
+      console.error('Batch select error:', error)
+      setMessage({
+        type: 'error',
+        text: 'Failed to batch select tasks',
+      })
+    } finally {
+      setTasksLoading(false)
+    }
+  }
+
   const handleAssign = async () => {
     if (!selectedCoder) {
       setMessage({ type: 'error', text: 'Please select a coder' })
@@ -375,25 +428,64 @@ export function ManagerAssignment() {
                   {selectedTasks.size} selected
                 </CardDescription>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={selectAllOnPage}
-                disabled={tasks.length === 0}
-                className="flex items-center gap-2"
-              >
-                {allOnPageSelected ? (
-                  <>
-                    <Square className="h-4 w-4" />
-                    Deselect page
-                  </>
-                ) : (
-                  <>
-                    <CheckSquare className="h-4 w-4" />
-                    Select page
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* 批量选择下拉菜单 - 基于所有任务 */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={taskTotal === 0 || tasksLoading}
+                      className="flex items-center gap-2"
+                    >
+                      <CheckSquare className="h-4 w-4" />
+                      Batch Select (All)
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem onClick={() => selectByRatio(0.25)}>
+                      Select 25% ({Math.ceil(taskTotal * 0.25)} of {taskTotal} tasks)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => selectByRatio(0.5)}>
+                      Select 50% ({Math.ceil(taskTotal * 0.5)} of {taskTotal} tasks)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => selectByRatio(0.75)}>
+                      Select 75% ({Math.ceil(taskTotal * 0.75)} of {taskTotal} tasks)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => selectByRatio(1)}>
+                      Select 100% (all {taskTotal} tasks)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={() => setSelectedTasks(new Set())}
+                      className="text-red-600"
+                    >
+                      Clear Selection
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* 当前页选择按钮 */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={selectAllOnPage}
+                  disabled={tasks.length === 0}
+                  className="flex items-center gap-2"
+                >
+                  {allOnPageSelected ? (
+                    <>
+                      <Square className="h-4 w-4" />
+                      Deselect page
+                    </>
+                  ) : (
+                    <>
+                      <CheckSquare className="h-4 w-4" />
+                      Select page
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
