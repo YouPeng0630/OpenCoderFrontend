@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Outlet, NavLink, useNavigate, Routes, Route, Navigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard,
@@ -38,6 +38,7 @@ export function ManagerLayout() {
   const [dataUploadOpen, setDataUploadOpen] = useState(true)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const navigation = [
     { 
@@ -483,9 +484,16 @@ export function ManagerLayout() {
           ) : (
             <div className="py-6">
               <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
-                {coderView === 'tasks' && <Coder noLayout={true} />}
-                {coderView === 'progress' && <CoderProgress />}
-                {coderView === 'consensus' && <CoderConsensus />}
+                {/* 如果是 consensus resolve 路由，显示 Outlet */}
+                {location.pathname.includes('/project-manager/consensus/') ? (
+                  <ConsensusResolution />
+                ) : (
+                  <>
+                    {coderView === 'tasks' && <Coder noLayout={true} />}
+                    {coderView === 'progress' && <CoderProgress />}
+                    {coderView === 'consensus' && <CoderConsensus />}
+                  </>
+                )}
               </div>
             </div>
           )}

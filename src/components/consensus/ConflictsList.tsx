@@ -16,6 +16,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { getToken } from '@/lib/storage';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ConflictsListProps {
   projectId: string;
@@ -63,6 +64,7 @@ interface Conflict {
 
 export function ConflictsList({ projectId }: ConflictsListProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,7 +103,12 @@ export function ConflictsList({ projectId }: ConflictsListProps) {
   };
 
   const handleViewConflict = (taskId: string) => {
-    navigate(`/coder/consensus/${taskId}`);
+    // 根据用户角色决定跳转路径
+    const isManagerMode = user?.role === 'project-manager';
+    const path = isManagerMode 
+      ? `/project-manager/consensus/${taskId}` 
+      : `/coder/consensus/${taskId}`;
+    navigate(path);
   };
 
   if (loading) {
