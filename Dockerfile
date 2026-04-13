@@ -24,11 +24,8 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-
-# Install ALL dependencies (including vite for preview)
-RUN npm ci
+# Install serve globally for static file serving
+RUN npm install -g serve
 
 # Copy built files from build stage
 COPY --from=build /app/dist ./dist
@@ -36,8 +33,5 @@ COPY --from=build /app/dist ./dist
 # Expose port
 EXPOSE 5174
 
-# Set environment variable to disable host check
-ENV VITE_HOST_CHECK=false
-
-# Listen on all interfaces so the port mapping works
-CMD ["npm", "run", "preview"]
+# Use serve to host static files (no host check issues)
+CMD ["serve", "-s", "dist", "-l", "5174"]
