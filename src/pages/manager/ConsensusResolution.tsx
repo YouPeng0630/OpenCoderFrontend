@@ -220,6 +220,10 @@ export function ConsensusResolution() {
 
       setSuccess(true);
       
+      // 检测用户角色，决定返回路径
+      const isManagerMode = user?.role === 'project-manager';
+      const returnPath = isManagerMode ? '/project-manager/dashboard' : `/coder/consensus`;
+      
       if (saveAndNext) {
         // 跳转到下一个冲突
         const nextIndex = currentIndex + 1;
@@ -230,17 +234,20 @@ export function ConsensusResolution() {
           setConsensusNote('');
           setSuccess(false);
           // 导航到下一个
-          navigate(`/coder/consensus/${nextTaskId}`);
+          const nextPath = isManagerMode 
+            ? `/project-manager/consensus/${nextTaskId}` 
+            : `/coder/consensus/${nextTaskId}`;
+          navigate(nextPath);
         } else {
           // 没有更多冲突了，返回列表
           setTimeout(() => {
-            navigate(`/coder/consensus`);
+            navigate(returnPath);
           }, 1000);
         }
       } else {
         // 保存后返回列表
         setTimeout(() => {
-          navigate(`/coder/consensus`);
+          navigate(returnPath);
         }, 1500);
       }
     } catch (err) {
