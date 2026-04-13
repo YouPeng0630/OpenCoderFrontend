@@ -35,11 +35,20 @@ export function ManagerLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [mode, setMode] = useState<'manager' | 'coder'>('manager')
   const [assignmentsOpen, setAssignmentsOpen] = useState(true)
+  const [dataUploadOpen, setDataUploadOpen] = useState(true)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
 
   const navigation = [
-    { name: 'Data Upload', href: '/project-manager/tasks', icon: UploadCloud },
+    { 
+      name: 'Data Upload', 
+      icon: UploadCloud, 
+      isDropdown: true,
+      children: [
+        { name: 'Tasks', href: '/project-manager/tasks', icon: CheckSquare },
+        { name: 'Others', href: '/project-manager/database', icon: MoreHorizontal },
+      ]
+    },
     { name: 'Code Book', href: '/project-manager/tags', icon: BookOpen },
     { 
       name: 'Assignments', 
@@ -52,7 +61,6 @@ export function ManagerLayout() {
     },
     { name: 'Dashboard', href: '/project-manager/dashboard', icon: LayoutDashboard },
     { name: 'Team Chat', href: '/project-manager/chat', icon: MessageSquare },
-    { name: 'Others', href: '/project-manager/database', icon: MoreHorizontal },
   ]
 
   const coderNavigation = [
@@ -87,10 +95,15 @@ export function ManagerLayout() {
               
               // 如果是下拉菜单
               if (item.isDropdown && item.children) {
+                const isOpen = item.name === 'Data Upload' ? dataUploadOpen : assignmentsOpen
+                const toggleOpen = item.name === 'Data Upload' 
+                  ? () => setDataUploadOpen(!dataUploadOpen)
+                  : () => setAssignmentsOpen(!assignmentsOpen)
+                
                 return (
                   <div key={item.name} className="space-y-1">
                     <button
-                      onClick={() => setAssignmentsOpen(!assignmentsOpen)}
+                      onClick={toggleOpen}
                       className="w-full group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
                     >
                       <div className="flex items-center">
@@ -98,11 +111,11 @@ export function ManagerLayout() {
                         {item.name}
                       </div>
                       <ChevronDown 
-                        className={`h-4 w-4 transition-transform ${assignmentsOpen ? 'rotate-180' : ''}`}
+                        className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
                       />
                     </button>
                     
-                    {assignmentsOpen && (
+                    {isOpen && (
                       <div className="ml-4 space-y-1">
                         {item.children.map((child) => {
                           const ChildIcon = child.icon
@@ -228,10 +241,15 @@ export function ManagerLayout() {
                   
                   // 如果是下拉菜单
                   if (item.isDropdown && item.children) {
+                    const isOpen = item.name === 'Data Upload' ? dataUploadOpen : assignmentsOpen
+                    const toggleOpen = item.name === 'Data Upload' 
+                      ? () => setDataUploadOpen(!dataUploadOpen)
+                      : () => setAssignmentsOpen(!assignmentsOpen)
+                    
                     return (
                       <div key={item.name} className="space-y-1">
                         <button
-                          onClick={() => setAssignmentsOpen(!assignmentsOpen)}
+                          onClick={toggleOpen}
                           className="w-full group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:bg-gray-100 hover:text-gray-900"
                         >
                           <div className="flex items-center">
@@ -239,11 +257,11 @@ export function ManagerLayout() {
                             {item.name}
                           </div>
                           <ChevronDown 
-                            className={`h-4 w-4 transition-transform ${assignmentsOpen ? 'rotate-180' : ''}`}
+                            className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
                           />
                         </button>
                         
-                        {assignmentsOpen && (
+                        {isOpen && (
                           <div className="ml-4 space-y-1">
                             {item.children.map((child) => {
                               const ChildIcon = child.icon

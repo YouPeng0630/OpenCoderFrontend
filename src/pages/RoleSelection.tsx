@@ -24,10 +24,10 @@ export const RoleSelection: React.FC = () => {
     },
     {
       value: 'coder' as UserRole,
-      title: 'Developer',
-      description: 'Focus on coding with integrated development environment',
+      title: 'Coder',
+      description: 'Apply to join projects and annotate data',
       icon: Code2,
-      features: ['Code Editor', 'Syntax Highlighting', 'Code Formatting', 'Auto Save'],
+      features: ['Apply to Join Projects', 'Code Sentences', 'Track Your Progress', 'Resolve Consensus'],
       color: 'text-green-600',
       bgColor: 'bg-green-50',
       borderColor: 'border-green-200',
