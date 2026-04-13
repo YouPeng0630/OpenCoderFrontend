@@ -39,8 +39,8 @@ export function CoderLayout() {
         <div className="flex flex-col flex-grow bg-white border-r border-gray-200">
           {/* Logo */}
           <div className="flex items-center h-16 flex-shrink-0 px-4 border-b border-gray-200">
-            <Code className="h-6 w-6 text-primary" />
-            <span className="ml-2 text-xl font-bold text-gray-900">Coder</span>
+            <img src="/logo.png" alt="OpenCoder" className="h-8 w-8" />
+            <span className="ml-2 text-xl font-bold text-gray-900">OpenCoder</span>
           </div>
 
           {/* Navigation */}
@@ -112,8 +112,8 @@ export function CoderLayout() {
             {/* Mobile navigation */}
             <div className="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
               <div className="flex-shrink-0 flex items-center px-4">
-                <Code className="h-6 w-6 text-primary" />
-                <span className="ml-2 text-xl font-bold text-gray-900">Coder</span>
+                <img src="/logo.png" alt="OpenCoder" className="h-8 w-8" />
+                <span className="ml-2 text-xl font-bold text-gray-900">OpenCoder</span>
               </div>
               <nav className="mt-5 px-2 space-y-1">
                 {navigation.map((item) => {
