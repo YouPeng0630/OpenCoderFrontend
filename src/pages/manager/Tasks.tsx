@@ -5,10 +5,11 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
-import { Plus, AlertCircle, Edit, Trash2, Upload, FileSpreadsheet, FolderOpen, Loader2, CheckCircle2, Image as ImageIcon } from 'lucide-react'
+import { Plus, AlertCircle, Edit, Trash2, Upload, FileSpreadsheet, FolderOpen, Loader2, CheckCircle2, Image as ImageIcon, FileText } from 'lucide-react'
 import { getToken } from '@/lib/storage'
 import { useAuth } from '@/contexts/AuthContext'
 import { ImageTaskUpload } from '@/components/tasks/ImageTaskUpload'
+import { parseBibliographyFile, BibliographicEntry, bibliographyToTaskPayload } from '@/lib/bibliography-parser'
 
 interface Task {
   id: string
@@ -21,7 +22,7 @@ interface Task {
   createdAt: string
 }
 
-type UploadMode = 'csv' | 'folder' | 'image'
+type UploadMode = 'csv' | 'folder' | 'image' | 'bibliography'
 type UploadStep = 'select' | 'column-select' | 'uploading' | 'complete'
 
 export function ManagerTasks() {
@@ -47,6 +48,12 @@ export function ManagerTasks() {
   // Folder upload states
   const [txtFiles, setTxtFiles] = useState<File[]>([])
   const [uploadResult, setUploadResult] = useState<{ success: number; failed: number } | null>(null)
+  
+  // Bibliography upload states
+  const [bibliographyFile, setBibliographyFile] = useState<File | null>(null)
+  const [bibliographyEntries, setBibliographyEntries] = useState<BibliographicEntry[]>([])
+  const [selectedBibEntries, setSelectedBibEntries] = useState<Set<number>>(new Set())
+  const [bibliographyError, setBibliographyError] = useState<string>('')
 
   // Fetch tasks from API
   const fetchTasks = async () => {
@@ -415,6 +422,122 @@ export function ManagerTasks() {
       alert('Failed to delete task: ' + error)
     }
   }
+  
+  // Handle bibliography file selection
+  const handleBibliographyFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    
+    setBibliographyFile(file)
+    setBibliographyError('')
+    
+    try {
+      const entries = await parseBibliographyFile(file)
+      
+      if (entries.length === 0) {
+        setBibliographyError('No valid entries found in the file')
+        return
+      }
+      
+      setBibliographyEntries(entries)
+      // Auto-select all entries
+      setSelectedBibEntries(new Set(entries.map((_, i) => i)))
+      // Move to column-select step (we'll use this for preview)
+      setUploadStep('column-select')
+    } catch (error) {
+      console.error('Failed to parse bibliography file:', error)
+      setBibliographyError('Failed to parse file: ' + (error as Error).message)
+    }
+  }
+  
+  // Toggle bibliography entry selection
+  const toggleBibEntry = (index: number) => {
+    const newSelected = new Set(selectedBibEntries)
+    if (newSelected.has(index)) {
+      newSelected.delete(index)
+    } else {
+      newSelected.add(index)
+    }
+    setSelectedBibEntries(newSelected)
+  }
+  
+  // Upload tasks from bibliography
+  const handleUploadFromBibliography = async () => {
+    if (!user?.project_id || selectedBibEntries.size === 0) {
+      alert('No entries selected')
+      return
+    }
+    
+    setUploadStep('uploading')
+    setUploading(true)
+    setUploadProgress(0)
+    
+    try {
+      const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
+      const token = getToken()
+      
+      console.log('📚 Starting bibliography upload...')
+      console.log('Project ID:', user.project_id)
+      console.log('Selected entries:', selectedBibEntries.size)
+      
+      const selectedEntries = bibliographyEntries.filter((_, i) => selectedBibEntries.has(i))
+      
+      // 构建 tasks 数组，格式与 CSV/TXT 一致
+      const tasks = selectedEntries.map((entry, index) => {
+        const taskData = bibliographyToTaskPayload(entry)
+        return {
+          title: taskData.title,  // 使用文献标题作为任务标题
+          payload: taskData.payload,
+          tags: [],
+          status: 'open'
+        }
+      })
+      
+      console.log(`Creating ${tasks.length} tasks in bulk...`)
+      
+      // 使用批量上传端点，与 CSV/TXT 一致
+      const response = await fetch(
+        `${apiBaseUrl}/api/projects/${user.project_id}/tasks/bulk?token=${encodeURIComponent(token)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ tasks }),
+        }
+      )
+      
+      setUploadProgress(50)
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('❌ Bulk upload failed:', errorText)
+        throw new Error(`Upload failed: ${errorText}`)
+      }
+      
+      const result = await response.json()
+      console.log('✅ Bulk upload complete:', result)
+      
+      const successCount = result.tasks?.length || tasks.length
+      const failedCount = tasks.length - successCount
+      
+      setUploadProgress(100)
+      setUploadResult({ success: successCount, failed: failedCount })
+      setUploadStep('complete')
+      
+      // Refresh task list
+      setTimeout(() => {
+        fetchTasks()
+      }, 500)
+    } catch (error) {
+      console.error('Failed to upload bibliography tasks:', error)
+      alert('Failed to upload tasks: ' + error)
+      setUploadStep('select')
+      setUploadResult({ success: 0, failed: selectedBibEntries.size })
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const filteredTasks = tasks.filter(
     (task) => filter === 'all' || task.status === filter
@@ -573,7 +696,7 @@ export function ManagerTasks() {
                 {/* Mode Selection */}
                 <div className="space-y-4">
                   <Label className="text-base font-medium">Select Upload Method</Label>
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {/* CSV Upload */}
                     <div
                       onClick={() => setUploadMode('csv')}
@@ -621,6 +744,22 @@ export function ManagerTasks() {
                         Upload images for annotation tasks
                       </p>
                     </div>
+                    
+                    {/* Bibliography Upload */}
+                    <div
+                      onClick={() => setUploadMode('bibliography')}
+                      className={`cursor-pointer border-2 rounded-lg p-6 transition-all ${
+                        uploadMode === 'bibliography'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <FileText className="h-10 w-10 text-primary mb-3" />
+                      <h3 className="font-semibold text-lg mb-2">Bibliography</h3>
+                      <p className="text-sm text-gray-500">
+                        Import from .bib, .ris, or .csv metadata files
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -637,6 +776,40 @@ export function ManagerTasks() {
                       }}
                       onCancel={() => setUploadDialogOpen(false)}
                     />
+                  ) : uploadMode === 'bibliography' ? (
+                    <>
+                      <Label htmlFor="bib-upload">Upload Bibliography File</Label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          id="bib-upload"
+                          type="file"
+                          accept=".bib,.ris,.csv"
+                          onChange={handleBibliographyFileSelect}
+                          className="hidden"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => document.getElementById('bib-upload')?.click()}
+                          className="w-full"
+                        >
+                          <Upload className="h-4 w-4 mr-2" />
+                          {bibliographyFile ? bibliographyFile.name : 'Choose .bib, .ris, or .csv'}
+                        </Button>
+                      </div>
+                      {bibliographyFile && !bibliographyError && (
+                        <p className="text-sm text-green-600 flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4" />
+                          File loaded: {bibliographyEntries.length} entries found
+                        </p>
+                      )}
+                      {bibliographyError && (
+                        <p className="text-sm text-red-600 flex items-center gap-2">
+                          <AlertCircle className="h-4 w-4" />
+                          {bibliographyError}
+                        </p>
+                      )}
+                    </>
                   ) : uploadMode === 'csv' ? (
                     <>
                       <Label htmlFor="csv-upload">Upload CSV File</Label>
@@ -734,16 +907,94 @@ export function ManagerTasks() {
               </>
             )}
 
-            {/* Step 2: Column Selection (CSV only) */}
+            {/* Step 2: Column Selection (CSV) or Entry Preview (Bibliography) */}
             {uploadStep === 'column-select' && (
               <>
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-base font-medium">Select Column for Task Content</Label>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Choose which column contains the text you want to use as tasks
-                    </p>
+                {uploadMode === 'bibliography' ? (
+                  /* Bibliography Entry Preview */
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-base font-medium">Select Entries to Import</Label>
+                        <p className="text-sm text-gray-500 mt-1">
+                          {selectedBibEntries.size} of {bibliographyEntries.length} entries selected
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedBibEntries(new Set(bibliographyEntries.map((_, i) => i)))}
+                        >
+                          Select All
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedBibEntries(new Set())}
+                        >
+                          Deselect All
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="max-h-96 overflow-y-auto space-y-2 border rounded-lg p-3">
+                      {bibliographyEntries.map((entry, index) => (
+                        <div
+                          key={index}
+                          onClick={() => toggleBibEntry(index)}
+                          className={`cursor-pointer border-2 rounded-lg p-4 transition-all ${
+                            selectedBibEntries.has(index)
+                              ? 'border-primary bg-primary/5'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={selectedBibEntries.has(index)}
+                              onChange={() => toggleBibEntry(index)}
+                              className="mt-1 h-4 w-4"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-900">{entry.title}</div>
+                              <div className="text-sm text-gray-600 mt-1">
+                                {entry.authors.slice(0, 3).join(', ')}
+                                {entry.authors.length > 3 && ` et al.`}
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1 flex gap-4">
+                                {entry.year && <span>Year: {entry.year}</span>}
+                                {entry.journal && <span>Journal: {entry.journal}</span>}
+                                {entry.doi && <span>DOI: {entry.doi}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t">
+                      <Button variant="outline" onClick={() => setUploadStep('select')}>
+                        Back
+                      </Button>
+                      <Button
+                        onClick={handleUploadFromBibliography}
+                        disabled={selectedBibEntries.size === 0}
+                      >
+                        Upload {selectedBibEntries.size} Tasks
+                      </Button>
+                    </div>
                   </div>
+                ) : (
+                  /* CSV Column Selection */
+                  <div className="space-y-4">
+                    <div>
+                      <Label className="text-base font-medium">Select Column for Task Content</Label>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Choose which column contains the text you want to use as tasks
+                      </p>
+                    </div>
 
                   <div className="space-y-2">
                     {csvColumns.map((column, index) => (
@@ -840,16 +1091,17 @@ export function ManagerTasks() {
                       )}
                     </p>
                   </div>
-                </div>
 
-                <div className="flex justify-end gap-3 pt-4 border-t">
-                  <Button variant="outline" onClick={() => setUploadStep('select')}>
-                    Back
-                  </Button>
-                  <Button onClick={handleUploadFromCsv} disabled={!selectedColumn}>
-                    {isDocumentLevel ? 'Split & Upload Tasks' : 'Upload Tasks'}
-                  </Button>
+                  <div className="flex justify-end gap-3 pt-4 border-t">
+                    <Button variant="outline" onClick={() => setUploadStep('select')}>
+                      Back
+                    </Button>
+                    <Button onClick={handleUploadFromCsv} disabled={!selectedColumn}>
+                      {isDocumentLevel ? 'Split & Upload Tasks' : 'Upload Tasks'}
+                    </Button>
+                  </div>
                 </div>
+                )}
               </>
             )}
 

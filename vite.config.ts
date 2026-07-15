@@ -11,12 +11,13 @@ export default defineConfig({
     },
   },
   preview: {
-    host: true,  // 监听所有地址，禁用 host 检查
+    host: '0.0.0.0',
     port: 5174,
     strictPort: true,
+    allowedHosts: ['opencoderfrontend-bbrp.onrender.com', '.onrender.com'],
   },
   server: {
-    host: true,  // 监听所有地址
+    host: '0.0.0.0',
     port: 5173,
   },
 })
