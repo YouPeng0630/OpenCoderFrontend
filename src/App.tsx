@@ -20,6 +20,7 @@ import { CoderProgress } from '@/pages/coder/CoderProgress';
 import { CoderConsensus } from '@/pages/coder/CoderConsensus';
 import { ApplyProject } from '@/pages/coder/ApplyProject';
 import { ApplicationPending } from '@/pages/coder/ApplicationPending';
+import { PDFCodingWorkspace } from '@/pages/PDFCodingWorkspace';
 
 function App() {
   return (
@@ -109,6 +110,16 @@ function App() {
             <Route path="consensus" element={<CoderConsensus />} />
             <Route path="consensus/:taskId" element={<ConsensusResolution />} />
           </Route>
+
+          {/* PDF Coding Workspace - standalone page accessible by both coders and managers */}
+          <Route
+            path="/pdf-coding/:taskId"
+            element={
+              <ProtectedRoute>
+                <PDFCodingWorkspace />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Default route: redirect to login */}
           <Route path="/" element={<Navigate to="/login" replace />} />

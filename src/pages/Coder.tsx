@@ -16,26 +16,78 @@ import {
   Loader2,
   CheckCircle,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  ArrowLeft
 } from 'lucide-react';
 import { MessageManagerDialog } from '@/components/notifications/MessageManagerDialog';
 import { ChatButton } from '@/components/chat/ChatButton';
+import { TaskTypeSelector, getTaskTypeConfig } from '@/components/tasks/TaskTypeSelector';
+import { BibliographicTaskDisplay } from '@/components/tasks/BibliographicTaskDisplay';
 
 interface Task {
   id: string;
   title: string;
-  task_type?: 'text' | 'url' | 'image';
+  task_type?: 'text' | 'url' | 'image' | 'video' | 'audio' | 'bibliographic' | 'pdf_document_coding';
   payload: {
     text?: string;
     image?: {
       drive_file_id?: string;
       drive_file_url: string;
       drive_cdn_url?: string;  // Google CDN URL (备选，更快)
+      drive_download_url?: string;  // Download URL (备用)
       drive_view_url?: string;
       drive_thumbnail_url?: string;
       original_filename: string;
       file_size: number;
       mime_type: string;
+    };
+    video?: {
+      drive_file_id?: string;
+      drive_file_url: string;
+      drive_cdn_url?: string;
+      drive_download_url?: string;
+      drive_view_url?: string;
+      drive_thumbnail_url?: string;
+      original_filename: string;
+      file_size: number;
+      mime_type: string;
+    };
+    audio?: {
+      drive_file_id?: string;
+      drive_file_url: string;
+      drive_cdn_url?: string;
+      drive_download_url?: string;
+      drive_view_url?: string;
+      drive_thumbnail_url?: string;
+      original_filename: string;
+      file_size: number;
+      mime_type: string;
+    };
+    meta?: {
+      bibliographic?: {
+        title?: string;
+        authors?: string[];
+        publicationDate?: string;
+        year?: string;
+        journal?: string;
+        volume?: string;
+        issue?: string;
+        pages?: string;
+        doi?: string;
+        pmid?: string;
+        abstract?: string;
+        keywords?: string[];
+        meshTerms?: string[];
+        publicationType?: string;
+        language?: string;
+        source?: string;
+        url?: string;
+        affiliations?: string;
+      };
+      [key: string]: any;
+    };
+    metadata?: {
+      bibliographic?: any;  // Legacy support
     };
     [key: string]: any;
   };
@@ -99,6 +151,77 @@ function getPayloadImage(task: Task | null): NonNullable<Task['payload']['image'
   return null;
 }
 
+/** True when payload carries video fields */
+function getPayloadVideo(task: Task | null): NonNullable<Task['payload']['video']> | null {
+  const vid = task?.payload?.video;
+  if (!vid || typeof vid !== 'object') return null;
+  const anyVid = vid as Record<string, unknown>;
+  if (
+    (typeof anyVid.drive_file_url === 'string' && anyVid.drive_file_url.trim()) ||
+    (typeof anyVid.drive_file_id === 'string' && anyVid.drive_file_id.trim()) ||
+    (typeof anyVid.drive_view_url === 'string' && anyVid.drive_view_url.trim()) ||
+    (typeof anyVid.drive_download_url === 'string' && anyVid.drive_download_url.trim())
+  ) {
+    return vid as NonNullable<Task['payload']['video']>;
+  }
+  return null;
+}
+
+/** True when payload carries audio fields */
+function getPayloadAudio(task: Task | null): NonNullable<Task['payload']['audio']> | null {
+  const aud = task?.payload?.audio;
+  if (!aud || typeof aud !== 'object') return null;
+  const anyAud = aud as Record<string, unknown>;
+  if (
+    (typeof anyAud.drive_file_url === 'string' && anyAud.drive_file_url.trim()) ||
+    (typeof anyAud.drive_file_id === 'string' && anyAud.drive_file_id.trim()) ||
+    (typeof anyAud.drive_view_url === 'string' && anyAud.drive_view_url.trim()) ||
+    (typeof anyAud.drive_download_url === 'string' && anyAud.drive_download_url.trim())
+  ) {
+    return aud as NonNullable<Task['payload']['audio']>;
+  }
+  return null;
+}
+
+/**
+ * Check if task is bibliographic
+ * Supports: task_type, payload.meta.bibliographic, or legacy payload.metadata.bibliographic
+ */
+function isBibliographicTask(task: Task | null): boolean {
+  if (!task) return false;
+  
+  // Primary: check task_type
+  if (task.task_type === 'bibliographic') return true;
+  
+  // Secondary: check for bibliographic metadata (new structure)
+  if (task.payload?.meta?.bibliographic) return true;
+  
+  // Legacy: check old metadata structure
+  if (task.payload?.metadata?.bibliographic) return true;
+  
+  return false;
+}
+
+/**
+ * Extract bibliographic metadata from task
+ * Tries payload.meta.bibliographic first, then falls back to payload.metadata.bibliographic
+ */
+function getBibliographicMetadata(task: Task | null): any | null {
+  if (!task) return null;
+  
+  // Try new structure first
+  if (task.payload?.meta?.bibliographic) {
+    return task.payload.meta.bibliographic;
+  }
+  
+  // Fall back to legacy structure
+  if (task.payload?.metadata?.bibliographic) {
+    return task.payload.metadata.bibliographic;
+  }
+  
+  return null;
+}
+
 /**
  * URLs to try for <img src>. Order matters:
  * - uc?export=view often returns HTML (virus scan / consent), so it fails as image — put it late.
@@ -159,6 +282,12 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
     confidence: number;
     reasoning: string;
   } | null>(null);
+
+  // 任务类型选择相关状态
+  const [showTaskTypeSelector, setShowTaskTypeSelector] = useState(false);
+  const [selectedTaskType, setSelectedTaskType] = useState<string | null>(null);
+  const [taskTypeStats, setTaskTypeStats] = useState<any[]>([]);
+  const [loadingStats, setLoadingStats] = useState(false);
 
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -289,8 +418,76 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
     }
   }, [user, apiBaseUrl]);
 
+  // 获取任务类型统计
+  const fetchTaskTypeStats = useCallback(async () => {
+    if (!user?.project_id) {
+      return;
+    }
+
+    try {
+      setLoadingStats(true);
+      const token = getToken();
+      if (!token) return;
+
+      const response = await fetch(
+        `${apiBaseUrl}/api/projects/${user.project_id}/tasks/stats/by-type?token=${encodeURIComponent(token)}`,
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch task stats');
+      }
+
+      const data = await response.json();
+      console.log('📊 Task type stats:', data);
+
+      // 定义所有可能的任务类型
+      const allTaskTypes = ['text', 'image', 'video', 'audio', 'url', 'bibliographic', 'pdf_document_coding'];
+
+      // 转换为 TaskTypeStats 格式，确保所有类型都显示
+      const stats = allTaskTypes.map((type) => {
+        const count = data.stats[type] || 0; // 如果没有该类型，显示 0
+        const config = getTaskTypeConfig(type);
+        return {
+          type,
+          count,
+          ...config,
+        };
+      });
+
+      // 按数量排序（有任务的排在前面）
+      stats.sort((a, b) => b.count - a.count);
+
+      console.log('✅ Converted task type stats:', stats);
+      setTaskTypeStats(stats);
+    } catch (error) {
+      console.error('❌ Failed to fetch task type stats:', error);
+    } finally {
+      setLoadingStats(false);
+    }
+  }, [user?.project_id, apiBaseUrl]);
+
+  // 处理任务类型选择
+  const handleSelectTaskType = (type: string | null) => {
+    console.log('🎯 Selected task type:', type);
+    setSelectedTaskType(type);
+    setShowTaskTypeSelector(false);
+    // 重新加载任务，直接传入选中的类型而不是等待 state 更新
+    fetchTaskAndTags(type);
+  };
+
+  // 返回任务类型选择器
+  const handleBackToTypeSelector = () => {
+    setShowTaskTypeSelector(true);
+    setCurrentTask(null);
+    fetchTaskTypeStats();
+  };
+
   // Wrap fetchTaskAndTags in useCallback to prevent re-creation
-  const fetchTaskAndTags = useCallback(async () => {
+  const fetchTaskAndTags = useCallback(async (taskType?: string | null) => {
     if (!user?.project_id) {
       console.log('⚠️ No project_id, skipping fetch');
       setLoading(false);
@@ -307,14 +504,21 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
 
       console.log('📡 Fetching next task for project:', user.project_id);
 
+      // 使用传入的 taskType 参数，如果没有则使用 state 中的 selectedTaskType
+      const typeToUse = taskType !== undefined ? taskType : selectedTaskType;
+      
+      // 构建 API URL，如果选择了任务类型则添加参数
+      let url = `${apiBaseUrl}/api/projects/${user.project_id}/my-next-task?token=${encodeURIComponent(token)}`;
+      if (typeToUse) {
+        url += `&task_type=${encodeURIComponent(typeToUse)}`;
+        console.log('🎯 Filtering by task type:', typeToUse);
+      }
+
       // Use the new /my-next-task endpoint
-      const response = await fetch(
-        `${apiBaseUrl}/api/projects/${user.project_id}/my-next-task?token=${encodeURIComponent(token)}`,
-        {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
 
       if (response.status === 404) {
         // No more tasks
@@ -336,6 +540,14 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       const task = data.task;
       if (task) {
         const transformedTask = mapApiTaskToTask(task);
+        
+        // Check if it's a PDF document coding task - redirect to dedicated workspace
+        if (transformedTask.task_type === 'pdf_document_coding') {
+          console.log('📄 PDF Document Coding task detected, redirecting to PDF workspace');
+          navigate(`/pdf-coding/${transformedTask.id}`);
+          return;
+        }
+        
         setCurrentTask(transformedTask);
         setSelectedTags({});  // Reset tags for new task
         console.log('✅ Current task loaded:', transformedTask.id, 'type:', transformedTask.task_type);
@@ -372,7 +584,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       console.log('🏁 Setting loading to false');
       setLoading(false);
     }
-  }, [user?.project_id, apiBaseUrl]);
+  }, [user?.project_id, apiBaseUrl, selectedTaskType]);
 
   // Check if user has a project or application - run only once on mount or when project_id changes
   useEffect(() => {
@@ -401,10 +613,16 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
           console.log('📝 No application found, redirecting to apply page...');
           navigate('/coder/apply', { replace: true });
         }
-      } else {
-        console.log('✅ Coder has project:', user.project_id, '- loading annotation interface...');
-        fetchTaskAndTags();
+        setLoading(false);
+        return;
       }
+
+      // 用户有项目，首先显示任务类型选择器
+      console.log('✅ User has project, showing task type selector');
+      setShowTaskTypeSelector(true);
+      await fetchTaskTypeStats();
+      setLoading(false);
+      console.log('📋 After fetchTaskTypeStats, showTaskTypeSelector:', true, 'loading:', false);
     };
     
     checkUserStatus();
@@ -439,7 +657,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
     // Check required tag groups
     for (const group of tagGroups) {
       if (group.required) {
-        const selected = selectedTags[group.group_id] || [];
+        const selected = selectedTags[group._id] || [];
         if (selected.length === 0) {
           return `Please select at least one option for "${group.name}" (required)`;
         }
@@ -497,9 +715,16 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
 
       if (result.success) {
         // Auto-fill AI suggested labels
+        // Convert group_id from API response to _id used in frontend state
         const suggestions: { [groupId: string]: string[] } = {};
         result.annotation.labels.forEach((label: any) => {
-          suggestions[label.group_id] = label.selected;
+          // Find the tag group by group_id and use its _id
+          const tagGroup = tagGroups.find(g => g.group_id === label.group_id);
+          if (tagGroup) {
+            suggestions[tagGroup._id] = label.selected;
+          } else {
+            console.warn(`⚠️ Tag group not found for group_id: ${label.group_id}`);
+          }
         });
 
         setSelectedTags(suggestions);
@@ -549,14 +774,14 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       
       // Convert selectedTags object to labels array format with tag names
       // Instead of saving option_ids, we save the actual option labels for better readability
-      const labelsArray = Object.entries(selectedTags).map(([group_id, option_values]) => {
-        // Find the tag group
-        const tagGroup = tagGroups.find(g => g.group_id === group_id);
+      const labelsArray = Object.entries(selectedTags).map(([tag_group_id, option_values]) => {
+        // Find the tag group by _id
+        const tagGroup = tagGroups.find(g => g._id === tag_group_id);
         
         if (!tagGroup) {
-          console.warn(`⚠️ Tag group ${group_id} not found`);
+          console.warn(`⚠️ Tag group ${tag_group_id} not found`);
           return {
-            group_id,
+            group_id: tag_group_id, // Fallback to the _id if not found
             option_ids: Array.isArray(option_values) ? option_values : [option_values]
           };
         }
@@ -570,7 +795,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
           });
           
           if (!option) {
-            console.warn(`⚠️ Option ${optionValue} not found in group ${group_id}`);
+            console.warn(`⚠️ Option ${optionValue} not found in group ${tag_group_id}`);
             return optionValue; // Fallback to the value itself
           }
           
@@ -579,7 +804,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
         });
         
         return {
-          group_id,
+          group_id: tagGroup.group_id, // Use the group_id field for backend API
           option_ids: optionLabels  // Now contains labels like "Positive", "School" instead of IDs
         };
       });
@@ -698,20 +923,44 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
     );
   }
 
-  if (!currentTask) {
+  // 显示任务类型选择器
+  if (showTaskTypeSelector) {
+    console.log('🎨 Rendering TaskTypeSelector with stats:', taskTypeStats);
     return (
       <ContentWrapper>
-        <div className="max-w-4xl mx-auto">
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">All Caught Up!</h2>
-              <p className="text-gray-500 text-center mb-6">
-                You have no assigned tasks at the moment.<br />
-                Check back later or contact your project manager.
-              </p>
-            </CardContent>
-          </Card>
+        <div className="max-w-6xl mx-auto space-y-6 py-8">
+          <TaskTypeSelector
+            stats={taskTypeStats}
+            onSelectType={handleSelectTaskType}
+            loading={loadingStats}
+          />
+        </div>
+      </ContentWrapper>
+    );
+  }
+
+  // 没有任务时的显示
+  if (!loading && !currentTask) {
+    console.log('🎨 Rendering "All Tasks Completed" screen');
+    return (
+      <ContentWrapper>
+        <div className="max-w-2xl mx-auto text-center space-y-6 py-12">
+          <div className="bg-gradient-to-br from-green-50 to-blue-50 border border-green-200 rounded-lg p-8">
+            <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">All Tasks Completed!</h2>
+            <p className="text-gray-600 mb-6">
+              {selectedTaskType 
+                ? `You've finished all ${selectedTaskType} tasks.`
+                : "Great work! You've completed all your assigned tasks."}
+            </p>
+            {selectedTaskType && (
+              <Button onClick={handleBackToTypeSelector} variant="outline" className="gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Back to Task Types
+              </Button>
+            )}
+          </div>
+          <MessageManagerDialog />
         </div>
       </ContentWrapper>
     );
@@ -720,11 +969,31 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
   return (
     <ContentWrapper>
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* Page Header with Message Button */}
+        {/* Page Header with Message Button and Back Button */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Task Annotation</h1>
-            <p className="text-sm text-gray-500 mt-1">Complete your assigned tasks</p>
+          <div className="flex items-center gap-4">
+            {selectedTaskType && (
+              <Button
+                onClick={handleBackToTypeSelector}
+                variant="ghost"
+                size="sm"
+                className="gap-2"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back
+              </Button>
+            )}
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                Task Annotation
+                {selectedTaskType && (
+                  <span className="ml-2 text-lg font-normal text-gray-500">
+                    ({getTaskTypeConfig(selectedTaskType).label})
+                  </span>
+                )}
+              </h1>
+              <p className="text-sm text-gray-500 mt-1">Complete your assigned tasks</p>
+            </div>
           </div>
           <MessageManagerDialog />
         </div>
@@ -743,7 +1012,235 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
           </div>
         )}
 
-        {/* Task Display */}
+        {/* Task Display - Two Column Layout for Bibliographic Tasks */}
+        {isBibliographicTask(currentTask) ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Column: Bibliographic Content */}
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      Current Task
+                      <ChevronRight className="h-5 w-5 text-gray-400" />
+                      <span className="text-sm font-normal text-gray-500">#{currentTask.id.slice(-6)}</span>
+                    </CardTitle>
+                    <Badge variant="secondary">Assigned</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {(() => {
+                    const bibMetadata = getBibliographicMetadata(currentTask);
+                    
+                    if (!bibMetadata) {
+                      return (
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                          <p className="text-sm text-gray-500">
+                            Bibliographic metadata not available
+                          </p>
+                          {currentTask.payload.text && (
+                            <p className="text-base text-gray-900 whitespace-pre-wrap leading-relaxed mt-4">
+                              {currentTask.payload.text}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    }
+                    
+                    return (
+                      <BibliographicTaskDisplay
+                        metadata={bibMetadata}
+                        abstract={currentTask.payload.text}
+                      />
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Right Column: Annotation Form */}
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Annotation Tags</CardTitle>
+                      <CardDescription>
+                        Select appropriate tags for this task. Fields marked with * are required.
+                      </CardDescription>
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={handleGetAISuggestion}
+                      disabled={loadingAISuggestion}
+                      className="flex items-center gap-2"
+                    >
+                    {loadingAISuggestion ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" />
+                        Get AI Suggestion
+                      </>
+                    )}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* AI Suggestion Display */}
+                  {aiSuggestion && (
+                    <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200">
+                      <div className="flex items-start gap-3">
+                        <Sparkles className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="font-semibold text-blue-900">AI Suggestion</span>
+                            <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                              Confidence: {(aiSuggestion.confidence * 100).toFixed(0)}%
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-blue-700 leading-relaxed">
+                            {aiSuggestion.reasoning}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {tagGroups.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <AlertCircle className="h-12 w-12 mx-auto mb-2 text-gray-400" />
+                      <p>No tag groups configured for this project.</p>
+                    </div>
+                  ) : (
+                    tagGroups.map((group) => (
+                      <div key={group._id} className="space-y-3">
+                        <Label className="text-base font-semibold text-gray-900">
+                          {group.name}
+                          {group.required && <span className="text-red-500 ml-1">*</span>}
+                          <span className="ml-2 text-xs font-normal text-gray-500">
+                            ({group.type === 'single' ? 'Single choice' : 'Multiple choice'})
+                          </span>
+                        </Label>
+                        {group.description && (
+                          <p className="text-sm text-gray-500 -mt-2">{group.description}</p>
+                        )}
+
+                        {group.type === 'single' ? (
+                          <RadioGroupPrimitive.Root
+                            value={selectedTags[group._id]?.[0] || ''}
+                            onValueChange={(value) => handleTagChange(group._id, value, 'single')}
+                            className="space-y-2"
+                          >
+                            {group.options.map((option) => {
+                                const optionValue = (option as any).option_id || option.value || option.label;
+                                const isSelected = selectedTags[group._id]?.includes(optionValue);
+
+                                return (
+                                  <div
+                                    key={optionValue}
+                                    className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-all ${
+                                      isSelected
+                                        ? 'border-primary bg-primary/5'
+                                        : 'border-gray-200 hover:border-gray-300'
+                                    }`}
+                                  >
+                                    <RadioGroupPrimitive.Item
+                                      value={optionValue}
+                                      className="h-5 w-5 rounded-full border-2 border-gray-300 data-[state=checked]:border-primary data-[state=checked]:bg-primary flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    >
+                                      <RadioGroupPrimitive.Indicator>
+                                        <Circle className="h-2.5 w-2.5 fill-white" />
+                                      </RadioGroupPrimitive.Indicator>
+                                    </RadioGroupPrimitive.Item>
+                                    <Label className="flex-1 cursor-pointer text-sm text-gray-900">
+                                      {option.label}
+                                    </Label>
+                                  </div>
+                                );
+                              })}
+                          </RadioGroupPrimitive.Root>
+                        ) : (
+                          <div className="space-y-2">
+                            {group.options.map((option) => {
+                                const optionValue = (option as any).option_id || option.value || option.label;
+                                const isChecked = selectedTags[group._id]?.includes(optionValue) ?? false;
+
+                                return (
+                                  <div
+                                    key={optionValue}
+                                    className={`flex items-center space-x-3 p-3 rounded-lg border-2 transition-all ${
+                                      isChecked
+                                        ? 'border-primary bg-primary/5'
+                                        : 'border-gray-200 hover:border-gray-300'
+                                    }`}
+                                  >
+                                    <CheckboxPrimitive.Root
+                                      checked={isChecked}
+                                      onCheckedChange={() =>
+                                        handleTagChange(group._id, optionValue, 'multi')
+                                      }
+                                      className="h-5 w-5 rounded border-2 border-gray-300 data-[state=checked]:bg-primary data-[state=checked]:border-primary flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                                    >
+                                      <CheckboxPrimitive.Indicator>
+                                        <Check className="h-4 w-4 text-white" />
+                                      </CheckboxPrimitive.Indicator>
+                                    </CheckboxPrimitive.Root>
+                                    <Label className="flex-1 cursor-pointer text-sm text-gray-900">
+                                      {option.label}
+                                    </Label>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+
+                  {/* Notes section */}
+                  <div className="space-y-3 pt-4 border-t">
+                    <Label htmlFor="notes" className="text-base font-semibold text-gray-900">
+                      Additional Notes (Optional)
+                    </Label>
+                    <textarea
+                      id="notes"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Add any observations, concerns, or comments about this task..."
+                      className="w-full min-h-[100px] p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+                    />
+                    <p className="text-xs text-gray-500">{note.length} characters</p>
+                  </div>
+
+                  {/* Submit Button */}
+                  <Button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="w-full"
+                    size="lg"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="mr-2 h-4 w-4" />
+                        Submit Annotation
+                      </>
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        ) : (
+          <>
+        {/* Original Single Column Layout for Non-Bibliographic Tasks */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -756,6 +1253,17 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
             </div>
           </CardHeader>
           <CardContent>
+            {(() => {
+              console.log('🎯 Current task:', currentTask);
+              console.log('🎯 Task type:', currentTask?.task_type);
+              console.log('🎯 Payload:', currentTask?.payload);
+              console.log('🎯 Payload.audio:', currentTask?.payload?.audio);
+              console.log('🎯 Payload keys:', Object.keys(currentTask?.payload || {}));
+              console.log('🎯 getPayloadImage:', getPayloadImage(currentTask));
+              console.log('🎯 getPayloadVideo:', getPayloadVideo(currentTask));
+              console.log('🎯 getPayloadAudio:', getPayloadAudio(currentTask));
+              return null;
+            })()}
             {getPayloadImage(currentTask) ? (() => {
               const imgPayload = getPayloadImage(currentTask)!;
               const fileId = getDriveFileIdForEmbed(imgPayload);
@@ -833,6 +1341,159 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                   ) : null}
                 </div>
               </div>
+              );
+            })() : getPayloadVideo(currentTask) ? (() => {
+              const videoPayload = getPayloadVideo(currentTask)!;
+              const driveFileId = videoPayload.drive_file_id;
+              const driveHref = videoPayload.drive_view_url || videoPayload.drive_file_url;
+              
+              // 使用后端代理 URL 来避免 CORS 问题
+              const proxyUrl = driveFileId 
+                ? `${apiBaseUrl}/api/proxy/drive/${driveFileId}`
+                : videoPayload.drive_download_url || videoPayload.drive_file_url;
+
+              return (
+                <div className="space-y-3">
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+                    {!proxyUrl ? (
+                      <p className="text-sm text-gray-500 p-6 text-center">
+                        No video URL in task payload.
+                        {driveHref ? (
+                          <>
+                            {' '}
+                            <a
+                              href={driveHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 underline"
+                            >
+                              Open in Google Drive
+                            </a>
+                          </>
+                        ) : null}
+                      </p>
+                    ) : (
+                      <video
+                        key={driveFileId}
+                        controls
+                        className="w-full max-h-[70vh] bg-black"
+                        preload="metadata"
+                        onError={(e) => {
+                          console.error('Video loading error:', e);
+                          console.error('Failed video URL:', proxyUrl);
+                        }}
+                        onLoadedMetadata={() => {
+                          console.log('✅ Video loaded successfully');
+                        }}
+                      >
+                        <source src={proxyUrl} type={videoPayload.mime_type || 'video/mp4'} />
+                        Your browser does not support video playback.
+                      </video>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500 space-y-1 px-1">
+                    {videoPayload.original_filename ? <p>📁 {videoPayload.original_filename}</p> : null}
+                    {typeof videoPayload.file_size === 'number' ? (
+                      <p>📊 {(videoPayload.file_size / 1024 / 1024).toFixed(1)} MB</p>
+                    ) : null}
+                    {driveHref ? (
+                      <p>
+                        🔗{' '}
+                        <a
+                          href={driveHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-500 hover:underline"
+                        >
+                          View in Google Drive
+                        </a>
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })() : getPayloadAudio(currentTask) ? (() => {
+              const audioPayload = getPayloadAudio(currentTask)!;
+              const driveFileId = audioPayload.drive_file_id;
+              const driveHref = audioPayload.drive_view_url || audioPayload.drive_file_url;
+              
+              // 使用后端代理 URL 来避免 CORS 问题
+              const proxyUrl = driveFileId 
+                ? `${apiBaseUrl}/api/proxy/drive/${driveFileId}`
+                : audioPayload.drive_download_url || audioPayload.drive_file_url;
+
+              return (
+                <div className="space-y-3">
+                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-gray-200 rounded-lg p-8 flex items-center justify-center min-h-[200px]">
+                    {!proxyUrl ? (
+                      <p className="text-sm text-gray-500 text-center">
+                        No audio URL in task payload.
+                        {driveHref ? (
+                          <>
+                            {' '}
+                            <a
+                              href={driveHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 underline"
+                            >
+                              Open in Google Drive
+                            </a>
+                          </>
+                        ) : null}
+                      </p>
+                    ) : (
+                      <div className="w-full max-w-md space-y-4">
+                        <audio
+                          key={driveFileId}
+                          controls
+                          className="w-full"
+                          preload="metadata"
+                          onError={(e) => {
+                            console.error('Audio loading error:', e);
+                            console.error('Failed audio URL:', proxyUrl);
+                          }}
+                          onLoadedMetadata={() => {
+                            console.log('✅ Audio loaded successfully');
+                          }}
+                        >
+                          <source src={proxyUrl} type={audioPayload.mime_type || 'audio/mpeg'} />
+                          Your browser does not support audio playback.
+                        </audio>
+                        <p className="text-xs text-gray-500 text-center">
+                          Can't play?
+                          <a
+                            href={driveHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline ml-1"
+                          >
+                            Open in Google Drive
+                          </a>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-500 space-y-1 px-1">
+                    {audioPayload.original_filename ? <p>📁 {audioPayload.original_filename}</p> : null}
+                    {typeof audioPayload.file_size === 'number' ? (
+                      <p>📊 {(audioPayload.file_size / 1024).toFixed(1)} KB</p>
+                    ) : null}
+                    {driveHref ? (
+                      <p>
+                        🔗{' '}
+                        <a
+                          href={driveHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-500 hover:underline"
+                        >
+                          View in Google Drive
+                        </a>
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
               );
             })() : (
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
@@ -916,10 +1577,10 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                   {group.type === 'single' ? (
                     // Radio buttons for single selection
                     <RadioGroupPrimitive.Root
-                      value={selectedTags[group.group_id]?.[0] || ''}
+                      value={selectedTags[group._id]?.[0] || ''}
                       onValueChange={(value: string) => {
-                        console.log('📻 Radio change event:', { group_id: group.group_id, value });
-                        handleTagChange(group.group_id, value, 'single');
+                        console.log('📻 Radio change event:', { group_id: group._id, value });
+                        handleTagChange(group._id, value, 'single');
                       }}
                       className="space-y-2"
                     >
@@ -929,7 +1590,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                         <div key={optionValue} className="flex items-center space-x-3">
                           <RadioGroupPrimitive.Item
                             value={optionValue}
-                            id={`radio-${group.group_id}-${optionValue}`}
+                            id={`radio-${group._id}-${optionValue}`}
                             className="aspect-square h-4 w-4 rounded-full border border-primary text-primary ring-offset-background focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <RadioGroupPrimitive.Indicator className="flex items-center justify-center">
@@ -937,7 +1598,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                             </RadioGroupPrimitive.Indicator>
                           </RadioGroupPrimitive.Item>
                           <label
-                            htmlFor={`radio-${group.group_id}-${optionValue}`}
+                            htmlFor={`radio-${group._id}-${optionValue}`}
                             className="text-sm text-gray-700 cursor-pointer font-normal flex-1"
                           >
                             <span>{option.label}</span>
@@ -956,9 +1617,9 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                         return (
                         <div key={optionValue} className="flex items-center space-x-3">
                           <CheckboxPrimitive.Root
-                            checked={(selectedTags[group.group_id] || []).includes(optionValue)}
-                            onCheckedChange={() => handleTagChange(group.group_id, optionValue, 'multi')}
-                            id={`check-${group.group_id}-${optionValue}`}
+                            checked={(selectedTags[group._id] || []).includes(optionValue)}
+                            onCheckedChange={() => handleTagChange(group._id, optionValue, 'multi')}
+                            id={`check-${group._id}-${optionValue}`}
                             className="h-4 w-4 shrink-0 rounded-sm border border-primary ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
                           >
                             <CheckboxPrimitive.Indicator className="flex items-center justify-center text-current">
@@ -966,7 +1627,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                             </CheckboxPrimitive.Indicator>
                           </CheckboxPrimitive.Root>
                           <label
-                            htmlFor={`check-${group.group_id}-${optionValue}`}
+                            htmlFor={`check-${group._id}-${optionValue}`}
                             className="text-sm text-gray-700 cursor-pointer font-normal flex-1"
                           >
                             <span>{option.label}</span>
@@ -1020,6 +1681,8 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
             </div>
           </CardContent>
         </Card>
+          </>
+        )}
       </div>
 
       {/* 浮动聊天按钮 */}

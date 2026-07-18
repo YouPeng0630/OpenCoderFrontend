@@ -5,10 +5,13 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
-import { Plus, AlertCircle, Edit, Trash2, Upload, FileSpreadsheet, FolderOpen, Loader2, CheckCircle2, Image as ImageIcon, FileText } from 'lucide-react'
+import { Plus, AlertCircle, Edit, Trash2, Upload, FileSpreadsheet, FolderOpen, Loader2, CheckCircle2, Image as ImageIcon, Video, Music, FileText } from 'lucide-react'
 import { getToken } from '@/lib/storage'
 import { useAuth } from '@/contexts/AuthContext'
 import { ImageTaskUpload } from '@/components/tasks/ImageTaskUpload'
+import { VideoTaskUpload } from '@/components/tasks/VideoTaskUpload'
+import { AudioTaskUpload } from '@/components/tasks/AudioTaskUpload'
+import { PDFTaskUpload } from '@/components/tasks/PDFTaskUpload'
 import { parseBibliographyFile, BibliographicEntry, bibliographyToTaskPayload } from '@/lib/bibliography-parser'
 
 interface Task {
@@ -22,7 +25,7 @@ interface Task {
   createdAt: string
 }
 
-type UploadMode = 'csv' | 'folder' | 'image' | 'bibliography'
+type UploadMode = 'csv' | 'folder' | 'image' | 'video' | 'audio' | 'bibliography' | 'pdf'
 type UploadStep = 'select' | 'column-select' | 'uploading' | 'complete'
 
 export function ManagerTasks() {
@@ -487,6 +490,7 @@ export function ManagerTasks() {
         const taskData = bibliographyToTaskPayload(entry)
         return {
           title: taskData.title,  // 使用文献标题作为任务标题
+          task_type: taskData.task_type,  // 添加 task_type: 'bibliographic'
           payload: taskData.payload,
           tags: [],
           status: 'open'
@@ -696,7 +700,7 @@ export function ManagerTasks() {
                 {/* Mode Selection */}
                 <div className="space-y-4">
                   <Label className="text-base font-medium">Select Upload Method</Label>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {/* CSV Upload */}
                     <div
                       onClick={() => setUploadMode('csv')}
@@ -744,6 +748,38 @@ export function ManagerTasks() {
                         Upload images for annotation tasks
                       </p>
                     </div>
+
+                    {/* Video Upload */}
+                    <div
+                      onClick={() => setUploadMode('video')}
+                      className={`cursor-pointer border-2 rounded-lg p-6 transition-all ${
+                        uploadMode === 'video'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <Video className="h-10 w-10 text-purple-600 mb-3" />
+                      <h3 className="font-semibold text-lg mb-2">Video</h3>
+                      <p className="text-sm text-gray-500">
+                        Upload videos for annotation tasks
+                      </p>
+                    </div>
+
+                    {/* Audio Upload */}
+                    <div
+                      onClick={() => setUploadMode('audio')}
+                      className={`cursor-pointer border-2 rounded-lg p-6 transition-all ${
+                        uploadMode === 'audio'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <Music className="h-10 w-10 text-pink-600 mb-3" />
+                      <h3 className="font-semibold text-lg mb-2">Audio</h3>
+                      <p className="text-sm text-gray-500">
+                        Upload audio files for annotation tasks
+                      </p>
+                    </div>
                     
                     {/* Bibliography Upload */}
                     <div
@@ -758,6 +794,22 @@ export function ManagerTasks() {
                       <h3 className="font-semibold text-lg mb-2">Bibliography</h3>
                       <p className="text-sm text-gray-500">
                         Import from .bib, .ris, or .csv metadata files
+                      </p>
+                    </div>
+                    
+                    {/* PDF Document Coding */}
+                    <div
+                      onClick={() => setUploadMode('pdf')}
+                      className={`cursor-pointer border-2 rounded-lg p-6 transition-all ${
+                        uploadMode === 'pdf'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <FileText className="h-10 w-10 text-purple-600 mb-3" />
+                      <h3 className="font-semibold text-lg mb-2">PDF Document Coding</h3>
+                      <p className="text-sm text-gray-500">
+                        Upload PDF for document-level and passage-level coding
                       </p>
                     </div>
                   </div>
@@ -775,6 +827,43 @@ export function ManagerTasks() {
                         fetchTasks();
                       }}
                       onCancel={() => setUploadDialogOpen(false)}
+                    />
+                  ) : uploadMode === 'video' ? (
+                    // 视频上传模式
+                    <VideoTaskUpload
+                      projectId={user.project_id}
+                      onSuccess={() => {
+                        setUploadStep('complete');
+                        setUploadResult({ success: 1, failed: 0 });
+                        fetchTasks();
+                      }}
+                      onCancel={() => setUploadDialogOpen(false)}
+                    />
+                  ) : uploadMode === 'audio' ? (
+                    // 音频上传模式
+                    <AudioTaskUpload
+                      projectId={user.project_id}
+                      onSuccess={() => {
+                        setUploadStep('complete');
+                        setUploadResult({ success: 1, failed: 0 });
+                        fetchTasks();
+                      }}
+                      onCancel={() => setUploadDialogOpen(false)}
+                    />
+                  ) : uploadMode === 'pdf' ? (
+                    // PDF Document Coding 上传模式
+                    <PDFTaskUpload
+                      projectId={user.project_id}
+                      onComplete={(taskId, documentId, readableTaskId) => {
+                        setUploadStep('complete');
+                        setUploadResult({ success: 1, failed: 0 });
+                        fetchTasks();
+                        // Optionally navigate to PDF Coding Workspace
+                        // navigate(`/pdf-coding/${taskId}`);
+                      }}
+                      onError={(error) => {
+                        alert(`Upload failed: ${error}`);
+                      }}
                     />
                   ) : uploadMode === 'bibliography' ? (
                     <>
@@ -958,16 +1047,36 @@ export function ManagerTasks() {
                               onClick={(e) => e.stopPropagation()}
                             />
                             <div className="flex-1">
-                              <div className="font-medium text-gray-900">{entry.title}</div>
-                              <div className="text-sm text-gray-600 mt-1">
+                              <div className="font-semibold text-gray-900 mb-1">{entry.title}</div>
+                              <div className="text-sm text-gray-700 mb-2">
                                 {entry.authors.slice(0, 3).join(', ')}
-                                {entry.authors.length > 3 && ` et al.`}
+                                {entry.authors.length > 3 && ` et al. (${entry.authors.length} authors)`}
                               </div>
-                              <div className="text-xs text-gray-500 mt-1 flex gap-4">
-                                {entry.year && <span>Year: {entry.year}</span>}
-                                {entry.journal && <span>Journal: {entry.journal}</span>}
-                                {entry.doi && <span>DOI: {entry.doi}</span>}
+                              <div className="text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+                                {entry.journal && <span><strong>Journal:</strong> {entry.journal}</span>}
+                                {entry.year && <span><strong>Year:</strong> {entry.year}</span>}
+                                {entry.volume && <span><strong>Vol:</strong> {entry.volume}</span>}
+                                {entry.issue && <span><strong>Issue:</strong> {entry.issue}</span>}
+                                {entry.pages && <span><strong>Pages:</strong> {entry.pages}</span>}
                               </div>
+                              {entry.doi && (
+                                <div className="text-xs text-blue-600 mt-1">
+                                  <a 
+                                    href={`https://doi.org/${entry.doi.replace(/^(https?:\/\/)?(dx\.)?doi\.org\//i, '')}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="hover:underline"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    DOI: {entry.doi}
+                                  </a>
+                                </div>
+                              )}
+                              {entry.abstract && (
+                                <div className="text-xs text-gray-500 mt-2 line-clamp-2">
+                                  {entry.abstract}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
