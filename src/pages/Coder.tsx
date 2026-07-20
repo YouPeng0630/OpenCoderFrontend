@@ -1347,17 +1347,17 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
               const driveFileId = videoPayload.drive_file_id;
               const driveHref = videoPayload.drive_view_url || videoPayload.drive_file_url;
               
-              // 使用后端代理 URL 来避免 CORS 问题
-              const proxyUrl = driveFileId 
-                ? `${apiBaseUrl}/api/proxy/drive/${driveFileId}`
-                : videoPayload.drive_download_url || videoPayload.drive_file_url;
+              // 使用 iframe 嵌入式播放器，绕过 CORS 问题且零流量成本
+              const embedUrl = driveFileId 
+                ? `https://drive.google.com/file/d/${driveFileId}/preview`
+                : null;
 
               return (
                 <div className="space-y-3">
                   <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
-                    {!proxyUrl ? (
+                    {!embedUrl ? (
                       <p className="text-sm text-gray-500 p-6 text-center">
-                        No video URL in task payload.
+                        No video available.
                         {driveHref ? (
                           <>
                             {' '}
@@ -1373,22 +1373,20 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                         ) : null}
                       </p>
                     ) : (
-                      <video
+                      <iframe
                         key={driveFileId}
-                        controls
-                        className="w-full max-h-[70vh] bg-black"
-                        preload="metadata"
+                        src={embedUrl}
+                        className="w-full bg-black"
+                        style={{ height: 'min(70vh, 640px)', border: 'none' }}
+                        allow="autoplay; fullscreen"
+                        title="Video Player"
+                        onLoad={() => {
+                          console.log('✅ Video iframe loaded successfully');
+                        }}
                         onError={(e) => {
-                          console.error('Video loading error:', e);
-                          console.error('Failed video URL:', proxyUrl);
+                          console.error('Video iframe loading error:', e);
                         }}
-                        onLoadedMetadata={() => {
-                          console.log('✅ Video loaded successfully');
-                        }}
-                      >
-                        <source src={proxyUrl} type={videoPayload.mime_type || 'video/mp4'} />
-                        Your browser does not support video playback.
-                      </video>
+                      />
                     )}
                   </div>
                   <div className="text-xs text-gray-500 space-y-1 px-1">
@@ -1417,17 +1415,17 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
               const driveFileId = audioPayload.drive_file_id;
               const driveHref = audioPayload.drive_view_url || audioPayload.drive_file_url;
               
-              // 使用后端代理 URL 来避免 CORS 问题
-              const proxyUrl = driveFileId 
-                ? `${apiBaseUrl}/api/proxy/drive/${driveFileId}`
-                : audioPayload.drive_download_url || audioPayload.drive_file_url;
+              // 使用 iframe 嵌入式播放器，绕过 CORS 问题且零流量成本
+              const embedUrl = driveFileId 
+                ? `https://drive.google.com/file/d/${driveFileId}/preview`
+                : null;
 
               return (
                 <div className="space-y-3">
-                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-gray-200 rounded-lg p-8 flex items-center justify-center min-h-[200px]">
-                    {!proxyUrl ? (
-                      <p className="text-sm text-gray-500 text-center">
-                        No audio URL in task payload.
+                  <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-gray-200 rounded-lg overflow-hidden">
+                    {!embedUrl ? (
+                      <p className="text-sm text-gray-500 p-6 text-center">
+                        No audio available.
                         {driveHref ? (
                           <>
                             {' '}
@@ -1443,34 +1441,21 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                         ) : null}
                       </p>
                     ) : (
-                      <div className="w-full max-w-md space-y-4">
-                        <audio
+                      <div className="w-full flex items-center justify-center p-4">
+                        <iframe
                           key={driveFileId}
-                          controls
-                          className="w-full"
-                          preload="metadata"
+                          src={embedUrl}
+                          className="w-full max-w-2xl"
+                          style={{ height: '200px', border: 'none' }}
+                          allow="autoplay"
+                          title="Audio Player"
+                          onLoad={() => {
+                            console.log('✅ Audio iframe loaded successfully');
+                          }}
                           onError={(e) => {
-                            console.error('Audio loading error:', e);
-                            console.error('Failed audio URL:', proxyUrl);
+                            console.error('Audio iframe loading error:', e);
                           }}
-                          onLoadedMetadata={() => {
-                            console.log('✅ Audio loaded successfully');
-                          }}
-                        >
-                          <source src={proxyUrl} type={audioPayload.mime_type || 'audio/mpeg'} />
-                          Your browser does not support audio playback.
-                        </audio>
-                        <p className="text-xs text-gray-500 text-center">
-                          Can't play?
-                          <a
-                            href={driveHref}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline ml-1"
-                          >
-                            Open in Google Drive
-                          </a>
-                        </p>
+                        />
                       </div>
                     )}
                   </div>
