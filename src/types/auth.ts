@@ -17,7 +17,11 @@ export interface AuthContextType {
   logout: () => void;
   updateUserRole: (role: UserRole) => Promise<void>;
   refreshUser: () => void;
-  clearRole: () => void;  // Clear user role
+  clearRole: () => void;
+  /** Enter a project from Hub; asRole selects Manager or Coder shell */
+  enterProject: (projectId: string, asRole?: 'manager' | 'coder') => Promise<void>;
+  /** Leave active project and return to Hub */
+  goToHub: () => Promise<void>;
 }
 
 export interface User {

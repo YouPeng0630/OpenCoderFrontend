@@ -48,6 +48,8 @@ interface PDFDocument {
   mime_type: string
   file_size: number
   page_count?: number
+  summary?: string
+  summary_model?: string
 }
 
 interface Task {
@@ -143,9 +145,53 @@ export function PDFCodingWorkspace() {
 
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [generatingSummary, setGeneratingSummary] = useState(false)
+  const [summaryError, setSummaryError] = useState<string | null>(null)
+  const [showManualText, setShowManualText] = useState(false)
+  const [manualText, setManualText] = useState('')
 
   const pageRef = useRef<HTMLDivElement>(null)
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
+
+  // Generate summary – optionally with manually pasted text
+  const handleGenerateSummary = async (customText?: string) => {
+    if (!document || !user?.project_id) return
+    setGeneratingSummary(true)
+    setSummaryError(null)
+    try {
+      const token = getToken()
+      const body = customText ? JSON.stringify({ custom_text: customText }) : undefined
+      const res = await fetch(
+        `${apiBaseUrl}/api/projects/${user.project_id}/pdf-coding/document/${document._id}/summary?token=${encodeURIComponent(token || '')}`,
+        {
+          method: 'POST',
+          headers: body ? { 'Content-Type': 'application/json' } : undefined,
+          body,
+        }
+      )
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Failed to generate summary' }))
+        // 422 with no_text → prompt manual input
+        if (res.status === 422 && err.detail?.no_text) {
+          setShowManualText(true)
+          setSummaryError(err.detail.message || 'Text could not be extracted. Please paste the document text below.')
+          return
+        }
+        const msg = typeof err.detail === 'string'
+          ? err.detail
+          : (err.detail?.message || JSON.stringify(err.detail) || 'Failed to generate summary')
+        throw new Error(msg)
+      }
+      const data = await res.json()
+      setDocument({ ...document, summary: data.summary, summary_model: data.summary_model })
+      setShowManualText(false)
+      setManualText('')
+    } catch (err: any) {
+      setSummaryError(err.message || 'Failed to generate summary')
+    } finally {
+      setGeneratingSummary(false)
+    }
+  }
 
   // Load task data
   const loadTaskData = useCallback(async () => {
@@ -494,7 +540,7 @@ export function PDFCodingWorkspace() {
           </CardHeader>
           <CardContent>
             <p className="text-gray-700 mb-4">{error}</p>
-            <Button onClick={() => navigate('/coder')}>
+            <Button onClick={() => navigate(user?.role === 'project-manager' ? '/project-manager/tasks' : '/coder')}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Tasks
             </Button>
@@ -514,7 +560,7 @@ export function PDFCodingWorkspace() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate('/coder')}
+                onClick={() => navigate(user?.role === 'project-manager' ? '/project-manager/tasks' : '/coder')}
               >
                 <ArrowLeft className="h-4 w-4 mr-2" />
                 Back
@@ -648,6 +694,87 @@ export function PDFCodingWorkspace() {
 
           {/* Right: Coding Panels */}
           <div className="space-y-4">
+            {/* AI Summary */}
+            <Card className="border-amber-200 bg-amber-50">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base text-amber-800">AI Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-2">
+                {document?.summary && !showManualText ? (
+                  <>
+                    <p className="text-sm text-amber-900 leading-relaxed whitespace-pre-wrap">
+                      {document.summary}
+                    </p>
+                    {document.summary_model && (
+                      <p className="text-xs text-amber-500 text-right">{document.summary_model}</p>
+                    )}
+                    <button
+                      onClick={() => handleGenerateSummary()}
+                      disabled={generatingSummary}
+                      className="text-xs text-amber-600 hover:underline disabled:opacity-50"
+                    >
+                      {generatingSummary ? 'Regenerating…' : 'Regenerate'}
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {!showManualText ? (
+                      <>
+                        <p className="text-sm text-amber-700">
+                          {generatingSummary ? 'Generating summary…' : 'No AI summary yet.'}
+                        </p>
+                        {!generatingSummary && (
+                          <button
+                            onClick={() => handleGenerateSummary()}
+                            className="text-sm font-medium text-amber-700 hover:underline text-left"
+                          >
+                            Generate Summary
+                          </button>
+                        )}
+                        {generatingSummary && (
+                          <div className="flex items-center gap-1 text-xs text-amber-600">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Working…
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-amber-700 leading-relaxed">
+                          Could not auto-extract text from this PDF. Paste the document content below and click Generate:
+                        </p>
+                        <textarea
+                          className="w-full h-40 text-xs border border-amber-300 rounded p-2 resize-y bg-white focus:outline-none focus:ring-1 focus:ring-amber-400"
+                          placeholder="Paste the PDF text here…"
+                          value={manualText}
+                          onChange={e => setManualText(e.target.value)}
+                          disabled={generatingSummary}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleGenerateSummary(manualText)}
+                            disabled={generatingSummary || !manualText.trim()}
+                            className="text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded px-3 py-1"
+                          >
+                            {generatingSummary ? 'Generating…' : 'Generate'}
+                          </button>
+                          <button
+                            onClick={() => { setShowManualText(false); setSummaryError(null) }}
+                            disabled={generatingSummary}
+                            className="text-sm text-amber-600 hover:underline disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {summaryError && (
+                      <p className="text-xs text-red-500">{summaryError}</p>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Document-level Coding */}
             <Card>
               <CardHeader>

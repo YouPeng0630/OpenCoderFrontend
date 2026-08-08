@@ -9,7 +9,8 @@ import {
   Link as LinkIcon,
   FileSearch,
   ChevronRight,
-  FileType 
+  FileType,
+  Layers,
 } from 'lucide-react';
 
 interface TaskTypeStats {
@@ -162,6 +163,12 @@ export function getTaskTypeConfig(type: string): {
       label: "PDF Document Coding",
       description: "Code PDF documents with document-level and passage-level annotations",
       color: "bg-red-100",
+    },
+    multimodal: {
+      icon: <Layers className={`${iconSize} text-indigo-700`} />,
+      label: "Multimodal Tasks",
+      description: "Annotate tasks that combine image, video, and/or audio",
+      color: "bg-indigo-100",
     },
   };
 

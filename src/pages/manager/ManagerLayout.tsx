@@ -21,7 +21,8 @@ import {
   BookOpen,
   MessageSquare,
   FolderKanban,
-  MoreHorizontal
+  MoreHorizontal,
+  LayoutGrid,
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Avatar from '@radix-ui/react-avatar'
@@ -41,6 +42,7 @@ export function ManagerLayout() {
   const location = useLocation()
 
   const navigation = [
+    { name: 'Projects', href: '/hub', icon: LayoutGrid },
     { 
       name: 'Data Upload', 
       icon: UploadCloud, 
@@ -56,7 +58,7 @@ export function ManagerLayout() {
       icon: FolderKanban, 
       isDropdown: true,
       children: [
-        { name: 'Coder Assignment', href: '/project-manager/applicants', icon: Users },
+        { name: 'Applicants Management', href: '/project-manager/applicants', icon: Users },
         { name: 'Task Assignment', href: '/project-manager/assignment', icon: UserCheck },
       ]
     },
@@ -65,6 +67,7 @@ export function ManagerLayout() {
   ]
 
   const coderNavigation = [
+    { name: 'Projects', href: '/hub', icon: LayoutGrid },
     { name: 'Tasks', href: '#tasks', icon: CheckSquare },
     { name: 'My Progress', href: '#progress', icon: TrendingUp },
     { name: 'Consensus', href: '#consensus', icon: AlertTriangle },
@@ -180,6 +183,18 @@ export function ManagerLayout() {
           <nav className="flex-1 px-2 py-4 space-y-1">
             {coderNavigation.map((item) => {
               const Icon = item.icon
+              if (item.href === '/hub') {
+                return (
+                  <NavLink
+                    key={item.name}
+                    to="/hub"
+                    className="group flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                  >
+                    <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                    {item.name}
+                  </NavLink>
+                )
+              }
               const isActive = 
                 (coderView === 'tasks' && item.href === '#tasks') ||
                 (coderView === 'progress' && item.href === '#progress') ||

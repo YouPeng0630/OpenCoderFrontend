@@ -82,15 +82,9 @@ export function AuthCallback() {
         // This way AuthContext will reinitialize and read the latest user data
         console.log('✅ User info saved, redirecting...')
         
-        // Redirect based on role
-        if (!user.role) {
-          console.log('→ Redirecting to role selection')
-          window.location.href = '/role-selection'
-        } else {
-          const targetPath = user.role === 'project-manager' ? '/project-manager' : '/coder'
-          console.log(`→ Redirecting to ${targetPath}`)
-          window.location.href = targetPath
-        }
+        // Always land on Project Hub to pick / create / join
+        console.log('→ Redirecting to Project Hub')
+        window.location.href = '/hub'
 
       } catch (err) {
         console.error('Auth callback error:', err)

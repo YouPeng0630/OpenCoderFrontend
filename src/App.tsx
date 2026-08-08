@@ -4,6 +4,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Login } from '@/pages/Login';
 import { AuthCallback } from '@/pages/AuthCallback';
 import { RoleSelection } from '@/pages/RoleSelection';
+import { ProjectHub } from '@/pages/ProjectHub';
 import { ManagerLayout } from '@/pages/manager/ManagerLayout';
 import { ManagerDashboard } from '@/pages/manager/Dashboard';
 import { CreateProject } from '@/pages/manager/CreateProject';
@@ -18,6 +19,7 @@ import { Coder } from '@/pages/Coder';
 import { CoderLayout } from '@/pages/coder/CoderLayout';
 import { CoderProgress } from '@/pages/coder/CoderProgress';
 import { CoderConsensus } from '@/pages/coder/CoderConsensus';
+import { CoderNotes } from '@/pages/coder/CoderNotes';
 import { ApplyProject } from '@/pages/coder/ApplyProject';
 import { ApplicationPending } from '@/pages/coder/ApplicationPending';
 import { PDFCodingWorkspace } from '@/pages/PDFCodingWorkspace';
@@ -36,7 +38,17 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
 
-          {/* Role selection (authenticated but no role) */}
+          {/* Project Hub — choose / create / join projects */}
+          <Route
+            path="/hub"
+            element={
+              <ProtectedRoute requireAuthOnly>
+                <ProjectHub />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Legacy role-selection redirects to Hub */}
           <Route
             path="/role-selection"
             element={
@@ -50,7 +62,7 @@ function App() {
           <Route
             path="/project-manager/create-project"
             element={
-              <ProtectedRoute requireRole="project-manager">
+              <ProtectedRoute requireAuthOnly>
                 <CreateProject />
               </ProtectedRoute>
             }
@@ -81,7 +93,7 @@ function App() {
           <Route
             path="/coder/apply"
             element={
-              <ProtectedRoute requireRole="coder">
+              <ProtectedRoute requireAuthOnly>
                 <ApplyProject />
               </ProtectedRoute>
             }
@@ -89,7 +101,7 @@ function App() {
           <Route
             path="/coder/pending"
             element={
-              <ProtectedRoute requireRole="coder">
+              <ProtectedRoute requireAuthOnly>
                 <ApplicationPending />
               </ProtectedRoute>
             }
@@ -108,6 +120,7 @@ function App() {
             <Route path="tasks" element={<Coder noLayout={true} />} />
             <Route path="progress" element={<CoderProgress />} />
             <Route path="consensus" element={<CoderConsensus />} />
+            <Route path="notes" element={<CoderNotes />} />
             <Route path="consensus/:taskId" element={<ConsensusResolution />} />
           </Route>
 

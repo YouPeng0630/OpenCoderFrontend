@@ -4,7 +4,8 @@ import { getToken } from '@/lib/storage'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Mail, Calendar, Check, X, AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { Mail, Calendar, Check, X, AlertCircle, Loader2, RefreshCw, Search, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 import * as Avatar from '@radix-ui/react-avatar'
 
 interface Application {
@@ -27,14 +28,26 @@ export function ManagerApplicants() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize] = useState(20)
+  const [totalApps, setTotalApps] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
 
   useEffect(() => {
-    fetchApplications()
-  }, [user])
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim())
+      setCurrentPage(1)
+    }, 300)
+    return () => clearTimeout(t)
+  }, [searchQuery])
 
   const fetchApplications = async (isRefresh = false) => {
     if (!user?.project_id) {
@@ -55,10 +68,18 @@ export function ManagerApplicants() {
         throw new Error('No authentication token')
       }
 
-      console.log('📡 Fetching applications for project:', user.project_id)
+      const params = new URLSearchParams({
+        token,
+        page: String(currentPage),
+        limit: String(pageSize),
+      })
+      if (filter !== 'all') params.set('status', filter)
+      if (dateFrom) params.set('date_from', dateFrom)
+      if (dateTo) params.set('date_to', dateTo)
+      if (debouncedSearch) params.set('search', debouncedSearch)
 
       const response = await fetch(
-        `${apiBaseUrl}/api/projects/${user.project_id}/applications?token=${encodeURIComponent(token)}&limit=100`,
+        `${apiBaseUrl}/api/projects/${user.project_id}/applications?${params.toString()}`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
@@ -70,14 +91,8 @@ export function ManagerApplicants() {
       }
 
       const data = await response.json()
-      console.log('📋 Applications data:', data)
-
-      // Parse response
       const appsList = data.items || data.applications || data.data || []
-      console.log('✅ Applications loaded:', appsList.length)
 
-      // Transform to frontend format
-      // Backend now includes applicant_name and applicant_email directly
       const transformedApps: Application[] = appsList.map((app: any) => ({
         id: app._id || app.id,
         applicant_user_id: app.applicant_user_id || app.applicantUserId || app.user_id || '',
@@ -92,19 +107,27 @@ export function ManagerApplicants() {
         updated_at: app.updated_at || app.updatedAt || new Date().toISOString(),
       }))
 
-      console.log('✅ Applications transformed:', transformedApps.length)
       setApplications(transformedApps)
+      setTotalApps(typeof data.total === 'number' ? data.total : transformedApps.length)
+      setTotalPages(typeof data.pages === 'number' ? Math.max(1, data.pages) : 1)
     } catch (error) {
       console.error('❌ Failed to fetch applications:', error)
       setMessage({
         type: 'error',
         text: error instanceof Error ? error.message : 'Failed to load applications',
       })
+      setApplications([])
+      setTotalApps(0)
+      setTotalPages(1)
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
   }
+
+  useEffect(() => {
+    fetchApplications()
+  }, [user?.project_id, filter, dateFrom, dateTo, debouncedSearch, currentPage, pageSize])
 
   const handleApprove = async (applicationId: string) => {
     if (!user?.project_id) {
@@ -230,11 +253,9 @@ export function ManagerApplicants() {
     }
   }
 
-  const filteredApplications = applications.filter(
-    (app) => filter === 'all' || app.status === filter
-  )
+  const hasActiveFilter = filter !== 'all' || !!searchQuery || !!dateFrom || !!dateTo
 
-  if (loading) {
+  if (loading && applications.length === 0 && !hasActiveFilter) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -279,43 +300,83 @@ export function ManagerApplicants() {
 
       {/* Filter Tabs */}
       <div className="flex gap-2 border-b border-gray-200">
-        {(['all', 'pending', 'approved', 'rejected'] as const).map((status) => {
-          const count = status === 'all' 
-            ? applications.length 
-            : applications.filter(app => app.status === status).length
-          
-          return (
-            <button
-              key={status}
-              onClick={() => setFilter(status)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                filter === status
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
+        {(['all', 'pending', 'approved', 'rejected'] as const).map((status) => (
+          <button
+            key={status}
+            onClick={() => { setFilter(status); setCurrentPage(1) }}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              filter === status
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {status.charAt(0).toUpperCase() + status.slice(1)}
+            {filter === status && (
               <span className="ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded-full">
-                {count}
+                {totalApps}
               </span>
-            </button>
-          )
-        })}
+            )}
+          </button>
+        ))}
       </div>
 
+      {/* Search + Date filters */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="Search by name or email…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <label className="text-xs text-gray-400">Applied from</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => { setDateFrom(e.target.value); setCurrentPage(1) }}
+            className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <label className="text-xs text-gray-400">To</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => { setDateTo(e.target.value); setCurrentPage(1) }}
+            className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+        {(searchQuery || dateFrom || dateTo) && (
+          <button
+            onClick={() => { setSearchQuery(''); setDateFrom(''); setDateTo(''); setCurrentPage(1) }}
+            className="text-xs text-gray-400 hover:text-gray-600 underline self-end mb-1"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs text-gray-400">
+        {totalApps} application{totalApps !== 1 ? 's' : ''}
+        {totalPages > 1 ? ` · page ${currentPage} of ${totalPages}` : ''}
+      </p>
+
       {/* Applications List */}
-      {filteredApplications.length === 0 ? (
+      {applications.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <AlertCircle className="h-12 w-12 text-gray-400 mb-4" />
             <p className="text-sm text-gray-500">
-              {loading ? 'Loading applications...' : `No ${filter} applications`}
+              {loading ? 'Loading applications...' : hasActiveFilter ? 'No applications match your filters' : `No ${filter} applications`}
             </p>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-4">
-          {filteredApplications.map((application) => (
+          {applications.map((application) => (
             <Card key={application.id}>
               <CardHeader>
                 <div className="flex items-start justify-between">
@@ -408,6 +469,32 @@ export function ManagerApplicants() {
               )}
             </Card>
           ))}
+        </div>
+      )}
+
+      {totalApps > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-gray-400">
+            Page {currentPage} of {totalPages} · {totalApps} applications
+          </p>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage <= 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage >= totalPages}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       )}
     </div>

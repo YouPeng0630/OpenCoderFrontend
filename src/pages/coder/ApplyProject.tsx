@@ -15,7 +15,7 @@ interface Project {
 }
 
 export function ApplyProject() {
-  const { user, clearRole } = useAuth()
+  const { user, goToHub } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProject, setSelectedProject] = useState<string>('')
   const [reason, setReason] = useState('')
@@ -30,10 +30,8 @@ export function ApplyProject() {
     fetchProjects()
   }, [])
 
-  // Handle changing role
-  const handleChangeRole = () => {
-    console.log('🔄 User wants to change role, clearing current role...')
-    clearRole()  // Clear role and navigate (handled inside clearRole)
+  const handleBackToHub = () => {
+    goToHub()
   }
 
   const fetchProjects = async () => {
@@ -46,10 +44,16 @@ export function ApplyProject() {
 
       console.log('📡 Fetching available projects...')
 
-      const response = await fetch(`${apiBaseUrl}/api/projects?token=${encodeURIComponent(token)}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      })
+      const [response, mineRes] = await Promise.all([
+        fetch(`${apiBaseUrl}/api/projects?token=${encodeURIComponent(token)}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        }),
+        fetch(`${apiBaseUrl}/api/users/me/projects?token=${encodeURIComponent(token)}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ])
 
       if (!response.ok) {
         throw new Error(`Failed to fetch projects: ${response.status}`)
@@ -58,7 +62,6 @@ export function ApplyProject() {
       const data = await response.json()
       console.log('📋 Projects data:', data)
 
-      // Parse projects
       let projectsList: any[] = []
       if (Array.isArray(data)) {
         projectsList = data
@@ -68,12 +71,22 @@ export function ApplyProject() {
         projectsList = data.data
       }
 
-      const transformedProjects: Project[] = projectsList.map((project: any) => ({
-        id: project.id || project._id || project.project_id || '',
-        name: project.name || project.project_name || 'Untitled Project',
-        slug: project.slug || '',
-        description: project.description || '',
-      }))
+      const memberIds = new Set<string>()
+      if (mineRes.ok) {
+        const mine = await mineRes.json()
+        for (const p of mine.projects || []) {
+          if (p.project_id) memberIds.add(String(p.project_id))
+        }
+      }
+
+      const transformedProjects: Project[] = projectsList
+        .map((project: any) => ({
+          id: project.id || project._id || project.project_id || '',
+          name: project.name || project.project_name || 'Untitled Project',
+          slug: project.slug || '',
+          description: project.description || '',
+        }))
+        .filter((p) => p.id && !memberIds.has(p.id))
 
       setProjects(transformedProjects)
       console.log('✅ Projects loaded:', transformedProjects.length)
@@ -261,9 +274,9 @@ export function ApplyProject() {
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
                   <Button
                     variant="outline"
-                    onClick={handleChangeRole}
+                    onClick={handleBackToHub}
                   >
-                    Change Role
+                    Back to Hub
                   </Button>
                   <Button
                     onClick={() => fetchProjects()}
@@ -403,10 +416,10 @@ export function ApplyProject() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={handleChangeRole}
+                  onClick={handleBackToHub}
                   disabled={submitting}
                 >
-                  Cancel
+                  Back to Hub
                 </Button>
                 <Button type="submit" disabled={submitting || projects.length === 0}>
                   {submitting ? (

@@ -42,7 +42,8 @@ export function CreateProject() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: 'Failed to create project' }))
-        throw new Error(errorData.message || `HTTP ${response.status}`)
+        const detail = errorData.detail || errorData.message || `HTTP ${response.status}`
+        throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
       }
 
       const result = await response.json()
@@ -54,12 +55,13 @@ export function CreateProject() {
       if (projectId) {
         console.log('✅ Project created with ID:', projectId)
         
-        // Update user info in localStorage
+        // Update user info in localStorage (active project + manager role)
         const currentUser = getUser()
         if (currentUser) {
           const updatedUser = {
             ...currentUser,
-            project_id: projectId
+            project_id: projectId,
+            role: 'project-manager' as const,
           }
           saveUser(updatedUser)
           console.log('✅ User info updated with project_id:', projectId)
@@ -69,8 +71,7 @@ export function CreateProject() {
         window.location.href = '/project-manager/dashboard'
       } else {
         console.warn('⚠️ Project created but no ID returned:', result)
-        // Still redirect, let dashboard handle it
-        navigate('/project-manager/dashboard', { replace: true })
+        navigate('/hub', { replace: true })
       }
     } catch (err) {
       console.error('Create project error:', err)
@@ -98,11 +99,18 @@ export function CreateProject() {
             <Rocket className="h-8 w-8 text-primary" />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Create Your First Project
+            Create a Project
           </h1>
           <p className="text-gray-600">
-            Let's set up your annotation project to get started
+            Set up an annotation project — you will be its Project Manager
           </p>
+          <button
+            type="button"
+            onClick={() => navigate('/hub')}
+            className="mt-3 text-sm text-primary hover:underline"
+          >
+            ← Back to Projects
+          </button>
         </div>
 
         {/* Form Card */}
@@ -110,7 +118,7 @@ export function CreateProject() {
           <CardHeader>
             <CardTitle>Project Details</CardTitle>
             <CardDescription>
-              You can create one project as a manager. Choose your project name carefully.
+              You can belong to up to 10 projects (create + join). Creating makes you the Project Manager.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -187,7 +195,7 @@ export function CreateProject() {
                   <div className="text-sm text-blue-800">
                     <p className="font-medium mb-1">Important:</p>
                     <ul className="list-disc list-inside space-y-1">
-                      <li>You can only create ONE project as a manager</li>
+                      <li>Create + join combined limit is 10 projects</li>
                       <li>Project name cannot be changed later</li>
                       <li>You can add team members and configure settings after creation</li>
                     </ul>

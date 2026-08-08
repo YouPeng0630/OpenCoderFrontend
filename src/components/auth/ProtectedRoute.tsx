@@ -6,18 +6,21 @@ import { UserRole } from '@/types/auth';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requireRole?: UserRole;
-  requireNoRole?: boolean; // For role selection page (only accessible without a role)
+  /** Hub / create / apply: any authenticated user */
+  requireAuthOnly?: boolean;
+  /** @deprecated use Hub instead of permanent role selection */
+  requireNoRole?: boolean;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requireRole,
+  requireAuthOnly = false,
   requireNoRole = false,
 }) => {
   const { isAuthenticated, user, isLoading } = useAuth();
   const location = useLocation();
 
-  // Show loading state while loading
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -29,32 +32,35 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     );
   }
 
-  // First layer: Check if logged in
   if (!isAuthenticated || !user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Second layer: Check if role selection is needed
-  if (!requireNoRole && !user.role) {
-    return <Navigate to="/role-selection" replace />;
+  // Legacy role-selection → always send to Hub
+  if (requireNoRole) {
+    return <Navigate to="/hub" replace />;
   }
 
-  // Special logic for role selection page: only accessible without a role
-  if (requireNoRole && user.role) {
-    // Already has role, redirect to corresponding page
-    const targetPath = user.role === 'project-manager' ? '/project-manager' : '/coder';
-    return <Navigate to={targetPath} replace />;
+  // Hub / create / apply: authenticated is enough
+  if (requireAuthOnly) {
+    return <>{children}</>;
   }
 
-  // Third layer: Check role permissions
-  if (requireRole && user.role !== requireRole) {
-    // Role mismatch, redirect to corresponding role's page
-    const targetPath = user.role === 'project-manager' ? '/project-manager' : '/coder';
-    return <Navigate to={targetPath} replace />;
+  // Manager / Coder shells need an active project + matching role
+  if (requireRole) {
+    if (!user.role || !user.project_id) {
+      return <Navigate to="/hub" replace />;
+    }
+    if (user.role !== requireRole) {
+      const targetPath = user.role === 'project-manager' ? '/project-manager' : '/coder';
+      return <Navigate to={targetPath} replace />;
+    }
   }
 
-  // All checks passed, render children
+  // Authenticated but no active project → Hub (unless already going somewhere auth-only)
+  if (!requireRole && !user.role) {
+    // Allow through only if no role required (shouldn't hit often)
+  }
+
   return <>{children}</>;
 };
-
-

@@ -10,6 +10,7 @@ import {
   getAuthState,
   saveUser,
   getUser,
+  getToken,
   clearAllStorage,
 } from '@/lib/storage';
 
@@ -56,16 +57,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Update user role
-  const updateUserRole = async (role: UserRole) => {
-    try {
-      const updatedUser = await api.updateUserRole(role);
-      saveUser(updatedUser);
-      setUser(updatedUser);
-    } catch (error) {
-      console.error('Update role failed:', error);
-      throw error;
-    }
+  // Deprecated: use enterProject(projectId, asRole) via Hub
+  const updateUserRole = async (_role: UserRole) => {
+    throw new Error(
+      'Direct role updates are disabled. Open /hub and Enter as Manager or Coder.'
+    );
   };
 
   // Refresh user info from localStorage
@@ -82,29 +78,69 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // Clear user role (for role switching)
-  const clearRole = () => {
+  const apiBase = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+  const enterProject = async (projectId: string, asRole?: 'manager' | 'coder') => {
+    const token = getToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(
+      `${apiBase}/api/users/me/active-project?token=${encodeURIComponent(token)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          as_role: asRole || null,
+        }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const detail = err.detail || `Failed to enter project (${res.status})`;
+      throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    }
+    const data = await res.json();
+    const role: UserRole | null =
+      data.role === 'manager' ? 'project-manager' :
+      data.role === 'coder' ? 'coder' : null;
+    const updatedUser: User = {
+      ...(user as User),
+      project_id: data.project_id,
+      role,
+    };
+    saveUser(updatedUser);
+    setUser(updatedUser);
+  };
+
+  const goToHub = async () => {
+    const token = getToken();
+    if (token) {
+      try {
+        await fetch(
+          `${apiBase}/api/users/me/active-project?token=${encodeURIComponent(token)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_id: null }),
+          }
+        );
+      } catch (e) {
+        console.warn('Failed to clear active project on server:', e);
+      }
+    }
     if (user) {
-      const updatedUser = {
-        ...user,
-        role: null,
-        project_id: null,  // Also clear project_id
-      };
+      const updatedUser = { ...user, role: null, project_id: null };
       saveUser(updatedUser);
       setUser(updatedUser);
-      
-      // Clear application-related localStorage
-      localStorage.removeItem('application_id');
-      localStorage.removeItem('applied_project_id');
-      
-      console.log('🔄 Role cleared, user can now select a new role');
-      console.log('🔄 Redirecting to role selection...');
-      
-      // Force page reload to ensure state is fully updated
-      setTimeout(() => {
-        window.location.href = '/role-selection';
-      }, 100);
     }
+    localStorage.removeItem('application_id');
+    localStorage.removeItem('applied_project_id');
+    window.location.href = '/hub';
+  };
+
+  // Clear active project and return to Hub
+  const clearRole = () => {
+    goToHub();
   };
 
   const value: AuthContextType = {
@@ -116,6 +152,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     updateUserRole,
     refreshUser,
     clearRole,
+    enterProject,
+    goToHub,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

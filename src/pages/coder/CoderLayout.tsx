@@ -10,7 +10,9 @@ import {
   User,
   ChevronDown,
   Code,
-  AlertTriangle
+  AlertTriangle,
+  StickyNote,
+  LayoutGrid,
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Avatar from '@radix-ui/react-avatar'
@@ -22,8 +24,10 @@ export function CoderLayout() {
   const navigate = useNavigate()
 
   const navigation = [
+    { name: 'Projects', href: '/hub', icon: LayoutGrid },
     { name: 'Tasks', href: '/coder/tasks', icon: CheckSquare },
     { name: 'My Progress', href: '/coder/progress', icon: TrendingUp },
+    { name: 'My Notes', href: '/coder/notes', icon: StickyNote },
     { name: 'Consensus', href: '/coder/consensus', icon: AlertTriangle },
   ]
 

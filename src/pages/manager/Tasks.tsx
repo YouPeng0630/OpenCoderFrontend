@@ -5,14 +5,17 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
-import { Plus, AlertCircle, Edit, Trash2, Upload, FileSpreadsheet, FolderOpen, Loader2, CheckCircle2, Image as ImageIcon, Video, Music, FileText } from 'lucide-react'
+import { Plus, AlertCircle, Edit, Trash2, Upload, FileSpreadsheet, FolderOpen, Loader2, CheckCircle2, Image as ImageIcon, Video, Music, FileText, Search, ChevronLeft, ChevronRight, Layers } from 'lucide-react'
+import { Input } from '@/components/ui/input'
 import { getToken } from '@/lib/storage'
 import { useAuth } from '@/contexts/AuthContext'
 import { ImageTaskUpload } from '@/components/tasks/ImageTaskUpload'
 import { VideoTaskUpload } from '@/components/tasks/VideoTaskUpload'
 import { AudioTaskUpload } from '@/components/tasks/AudioTaskUpload'
 import { PDFTaskUpload } from '@/components/tasks/PDFTaskUpload'
+import { MultimodalTaskUpload } from '@/components/tasks/MultimodalTaskUpload'
 import { parseBibliographyFile, BibliographicEntry, bibliographyToTaskPayload } from '@/lib/bibliography-parser'
+import { TranscriptControl } from '@/components/transcription/TranscriptControl'
 
 interface Task {
   id: string
@@ -23,17 +26,56 @@ interface Task {
   assignee?: string
   dueDate?: string
   createdAt: string
+  task_type?: string
+  transcription_status?: string
 }
 
-type UploadMode = 'csv' | 'folder' | 'image' | 'video' | 'audio' | 'bibliography' | 'pdf'
+type UploadMode = 'csv' | 'folder' | 'image' | 'video' | 'audio' | 'bibliography' | 'pdf' | 'multimodal'
 type UploadStep = 'select' | 'column-select' | 'uploading' | 'complete'
+
+function mapBackendStatus(status: string): Task['status'] {
+  switch (status) {
+    case 'open':
+      return 'pending'
+    case 'assigned':
+    case 'in_progress':
+      return 'in-progress'
+    case 'done':
+    case 'completed':
+      return 'completed'
+    default:
+      return 'pending'
+  }
+}
+
+function toBackendStatus(filter: 'all' | 'pending' | 'in-progress' | 'completed'): string | null {
+  switch (filter) {
+    case 'pending':
+      return 'open'
+    case 'in-progress':
+      return 'in_progress'
+    case 'completed':
+      return 'done'
+    default:
+      return null
+  }
+}
 
 export function ManagerTasks() {
   const { user } = useAuth()
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'pending' | 'in-progress' | 'completed'>('all')
-  
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [pageSize, setPageSize] = useState(10)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalTasks, setTotalTasks] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+
   // Upload dialog states
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [uploadMode, setUploadMode] = useState<UploadMode>('csv')
@@ -58,7 +100,12 @@ export function ManagerTasks() {
   const [selectedBibEntries, setSelectedBibEntries] = useState<Set<number>>(new Set())
   const [bibliographyError, setBibliographyError] = useState<string>('')
 
-  // Fetch tasks from API
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300)
+    return () => clearTimeout(t)
+  }, [searchQuery])
+
+  // Fetch tasks from API (server-side filters + pagination)
   const fetchTasks = async () => {
     if (!user?.project_id) {
       console.log('No project_id, skipping task fetch')
@@ -67,6 +114,7 @@ export function ManagerTasks() {
     }
 
     try {
+      setLoading(true)
       const token = getToken()
       if (!token) {
         console.error('No token found')
@@ -75,11 +123,20 @@ export function ManagerTasks() {
       }
 
       const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
-      
-      console.log('Fetching tasks for project:', user.project_id)
-      
+      const params = new URLSearchParams({
+        token,
+        page: String(currentPage),
+        limit: String(pageSize),
+      })
+      const backendStatus = toBackendStatus(filter)
+      if (backendStatus) params.set('status', backendStatus)
+      if (typeFilter !== 'all') params.set('task_type', typeFilter)
+      if (dateFrom) params.set('date_from', dateFrom)
+      if (dateTo) params.set('date_to', dateTo)
+      if (debouncedSearch) params.set('search', debouncedSearch)
+
       const response = await fetch(
-        `${apiBaseUrl}/api/projects/${user.project_id}/tasks?token=${encodeURIComponent(token)}&page=1&limit=100`,
+        `${apiBaseUrl}/api/projects/${user.project_id}/tasks?${params.toString()}`,
         {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
@@ -91,86 +148,39 @@ export function ManagerTasks() {
       }
 
       const result = await response.json()
-      console.log('📦 Tasks API response:', result)
-      console.log('📦 Response type:', typeof result)
-      console.log('📦 Response keys:', Object.keys(result))
-      console.log('📦 Is array?', Array.isArray(result))
+      const tasksData: any[] = Array.isArray(result)
+        ? result
+        : (result.items || result.tasks || result.data || [])
 
-      // Parse response - support multiple formats
-      let tasksData: any[] = []
-      
-      // Try different possible formats
-      if (Array.isArray(result)) {
-        // Format 1: Direct array
-        tasksData = result
-        console.log('✅ Format: Direct array')
-      } else if (result.tasks && Array.isArray(result.tasks)) {
-        // Format 2: { tasks: [...] }
-        tasksData = result.tasks
-        console.log('✅ Format: { tasks: [...] }')
-      } else if (result.data && Array.isArray(result.data)) {
-        // Format 3: { data: [...] }
-        tasksData = result.data
-        console.log('✅ Format: { data: [...] }')
-      } else if (result.items && Array.isArray(result.items)) {
-        // Format 4: { items: [...] }
-        tasksData = result.items
-        console.log('✅ Format: { items: [...] }')
-      } else {
-        // Check if result itself has task-like properties
-        console.error('❌ Unknown format. Full response:', JSON.stringify(result, null, 2))
-        setTasks([])
-        return
-      }
-      
-      if (tasksData.length === 0) {
-        console.log('ℹ️ No tasks found in response')
-        setTasks([])
-        return
-      }
-
-      // Transform backend tasks to frontend format
       const transformedTasks: Task[] = tasksData.map((task: any) => ({
         id: task.id || task._id || task.task_id,
         title: task.title || task.payload?.text?.substring(0, 100) || 'Untitled',
         description: task.payload?.text || '',
         status: mapBackendStatus(task.status),
-        priority: 'medium', // Default priority
+        priority: 'medium',
         assignee: task.assigned_to?.username || undefined,
         dueDate: task.due_date || undefined,
         createdAt: task.created_at || new Date().toISOString(),
+        task_type: task.task_type,
+        transcription_status: task.transcription_status,
       }))
-      
+
       setTasks(transformedTasks)
-      console.log(`✅ Loaded ${transformedTasks.length} tasks`)
-      console.log('📋 First task sample:', transformedTasks[0])
+      setTotalTasks(typeof result.total === 'number' ? result.total : transformedTasks.length)
+      setTotalPages(typeof result.pages === 'number' ? Math.max(1, result.pages) : 1)
     } catch (error) {
       console.error('Failed to fetch tasks:', error)
       setTasks([])
+      setTotalTasks(0)
+      setTotalPages(1)
     } finally {
       setLoading(false)
     }
   }
 
-  // Map backend status to frontend status
-  const mapBackendStatus = (status: string): Task['status'] => {
-    switch (status) {
-      case 'open':
-        return 'pending'
-      case 'assigned':
-      case 'in_progress':
-        return 'in-progress'
-      case 'done':
-      case 'completed':
-        return 'completed'
-      default:
-        return 'pending'
-    }
-  }
-
   useEffect(() => {
     fetchTasks()
-  }, [user?.project_id])
+  }, [user?.project_id, filter, typeFilter, dateFrom, dateTo, debouncedSearch, currentPage, pageSize])
 
   const handleCreateTask = () => {
     setUploadDialogOpen(true)
@@ -414,12 +424,7 @@ export function ManagerTasks() {
 
       const result = await response.json()
       console.log('✅ Task deleted:', result.message || 'Task deleted successfully')
-      
-      // Remove task from local state
-      setTasks(tasks.filter(task => task.id !== taskId))
-      
-      // Or refresh the entire list
-      // fetchTasks()
+      await fetchTasks()
     } catch (error) {
       console.error('Failed to delete task:', error)
       alert('Failed to delete task: ' + error)
@@ -543,9 +548,8 @@ export function ManagerTasks() {
     }
   }
 
-  const filteredTasks = tasks.filter(
-    (task) => filter === 'all' || task.status === filter
-  )
+  const safePage = Math.min(currentPage, totalPages)
+  const hasActiveFilter = filter !== 'all' || typeFilter !== 'all' || !!dateFrom || !!dateTo || !!searchQuery
 
   const getStatusColor = (status: Task['status']) => {
     switch (status) {
@@ -558,7 +562,7 @@ export function ManagerTasks() {
     }
   }
 
-  if (loading) {
+  if (loading && tasks.length === 0 && !hasActiveFilter) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -587,7 +591,7 @@ export function ManagerTasks() {
         {(['all', 'pending', 'in-progress', 'completed'] as const).map((status) => (
           <button
             key={status}
-            onClick={() => setFilter(status)}
+            onClick={() => { setFilter(status); setCurrentPage(1) }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               filter === status
                 ? 'border-primary text-primary'
@@ -599,24 +603,108 @@ export function ManagerTasks() {
         ))}
       </div>
 
+      {/* Extra filters: search, type, date, page size */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="Search tasks…"
+            value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1) }}
+            className="pl-9"
+          />
+        </div>
+
+        <select
+          value={typeFilter}
+          onChange={e => { setTypeFilter(e.target.value); setCurrentPage(1) }}
+          className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="all">All Types</option>
+          <option value="text">Text</option>
+          <option value="image">Image</option>
+          <option value="video">Video</option>
+          <option value="audio">Audio</option>
+          <option value="bibliographic">Bibliographic</option>
+          <option value="pdf_document_coding">PDF</option>
+          <option value="multimodal">Multimodal</option>
+        </select>
+
+        <div className="flex flex-col gap-0.5">
+          <label className="text-xs text-gray-400">Created from</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => { setDateFrom(e.target.value); setCurrentPage(1) }}
+            className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <label className="text-xs text-gray-400">To</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => { setDateTo(e.target.value); setCurrentPage(1) }}
+            className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+
+        <select
+          value={pageSize}
+          onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1) }}
+          className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value={5}>5 / page</option>
+          <option value={10}>10 / page</option>
+          <option value={50}>50 / page</option>
+          <option value={100}>100 / page</option>
+        </select>
+
+        {hasActiveFilter && (
+          <button
+            onClick={() => {
+              setSearchQuery('')
+              setTypeFilter('all')
+              setDateFrom('')
+              setDateTo('')
+              setFilter('all')
+              setCurrentPage(1)
+            }}
+            className="text-xs text-gray-400 hover:text-gray-600 underline self-end mb-1"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+
+      {/* Result count */}
+      <p className="text-xs text-gray-400">
+        {totalTasks} task{totalTasks !== 1 ? 's' : ''}
+        {totalPages > 1 ? ` · page ${safePage} of ${totalPages}` : ''}
+      </p>
+
       {/* Tasks List */}
-      {filteredTasks.length === 0 ? (
+      {tasks.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <AlertCircle className="h-12 w-12 text-gray-400 mb-4" />
-            <p className="text-sm text-gray-500">No {filter !== 'all' ? filter : ''} tasks</p>
-            <p className="text-xs text-gray-400 mt-1">
-              Create your first task to get started
+            <p className="text-sm text-gray-500">
+              {hasActiveFilter ? 'No tasks match your filters' : 'No tasks'}
             </p>
-            <Button onClick={handleCreateTask} className="mt-4" variant="outline" size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              Create Task
-            </Button>
+            <p className="text-xs text-gray-400 mt-1">
+              {hasActiveFilter ? 'Try clearing filters' : 'Create your first task to get started'}
+            </p>
+            {!hasActiveFilter && (
+              <Button onClick={handleCreateTask} className="mt-4" variant="outline" size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Create Task
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-4">
-          {filteredTasks.map((task) => (
+          {tasks.map((task) => (
             <Card key={task.id}>
               <CardHeader>
                 <div className="flex items-start justify-between">
@@ -656,10 +744,67 @@ export function ManagerTasks() {
                     <span>Due: <strong>{new Date(task.dueDate).toLocaleDateString()}</strong></span>
                   )}
                   <span>Created: {new Date(task.createdAt).toLocaleDateString()}</span>
+                  {task.task_type && (
+                    <span className="capitalize text-xs bg-gray-100 px-2 py-0.5 rounded">
+                      {task.task_type.replace(/_/g, ' ')}
+                    </span>
+                  )}
                 </div>
+                {/* Transcript control for audio/video tasks */}
+                {(task.task_type === 'audio' || task.task_type === 'video' || task.task_type === 'multimodal') && user?.project_id && (
+                  <TranscriptControl
+                    projectId={user.project_id}
+                    taskId={task.id}
+                    initialStatus={task.transcription_status}
+                  />
+                )}
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalTasks > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-gray-400">
+            Page {safePage} of {totalPages} · {totalTasks} tasks
+          </p>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+              const page = totalPages <= 7 ? i + 1
+                : safePage <= 4 ? i + 1
+                : safePage >= totalPages - 3 ? totalPages - 6 + i
+                : safePage - 3 + i
+              return (
+                <Button
+                  key={page}
+                  variant={page === safePage ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setCurrentPage(page)}
+                  className="w-8 h-8 p-0 text-xs"
+                >
+                  {page}
+                </Button>
+              )
+            })}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       )}
 
@@ -780,6 +925,22 @@ export function ManagerTasks() {
                         Upload audio files for annotation tasks
                       </p>
                     </div>
+
+                    {/* Multimodal Upload */}
+                    <div
+                      onClick={() => setUploadMode('multimodal')}
+                      className={`cursor-pointer border-2 rounded-lg p-6 transition-all ${
+                        uploadMode === 'multimodal'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <Layers className="h-10 w-10 text-indigo-600 mb-3" />
+                      <h3 className="font-semibold text-lg mb-2">Multimodal</h3>
+                      <p className="text-sm text-gray-500">
+                        One task with image + video + audio combined
+                      </p>
+                    </div>
                     
                     {/* Bibliography Upload */}
                     <div
@@ -842,6 +1003,16 @@ export function ManagerTasks() {
                   ) : uploadMode === 'audio' ? (
                     // 音频上传模式
                     <AudioTaskUpload
+                      projectId={user.project_id}
+                      onSuccess={() => {
+                        setUploadStep('complete');
+                        setUploadResult({ success: 1, failed: 0 });
+                        fetchTasks();
+                      }}
+                      onCancel={() => setUploadDialogOpen(false)}
+                    />
+                  ) : uploadMode === 'multimodal' ? (
+                    <MultimodalTaskUpload
                       projectId={user.project_id}
                       onSuccess={() => {
                         setUploadStep('complete');
@@ -970,8 +1141,8 @@ export function ManagerTasks() {
                   )}
                 </div>
 
-                {/* Action Buttons */}
-                {uploadMode !== 'image' && (
+                {/* Action Buttons — only for modes without their own upload UI */}
+                {!['image', 'video', 'audio', 'pdf', 'multimodal'].includes(uploadMode) && (
                   <div className="flex justify-end gap-3 pt-4 border-t">
                     <Button variant="outline" onClick={() => setUploadDialogOpen(false)}>
                       Cancel

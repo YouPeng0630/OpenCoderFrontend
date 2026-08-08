@@ -12,12 +12,7 @@ export function Login() {
 
   useEffect(() => {
     if (isAuthenticated && user) {
-      if (!user.role) {
-        navigate('/role-selection', { replace: true })
-      } else {
-        const targetPath = user.role === 'project-manager' ? '/project-manager' : '/coder'
-        navigate(targetPath, { replace: true })
-      }
+      navigate('/hub', { replace: true })
     }
   }, [isAuthenticated, user, navigate])
 

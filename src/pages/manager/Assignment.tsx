@@ -123,20 +123,26 @@ export function ManagerAssignment() {
       codersList = codersData.data
     }
 
-    const transformedCoders: Coder[] = codersList.map((coder: any) => ({
-      id: coder.id || coder._id || '',
-      name: coder.name || coder.username || 'Unknown',
-      email: coder.email || '',
-      avatar_url: coder.avatar_url || coder.avatarUrl || coder.avatar || '',
-      assigned_tasks: coder.assigned_tasks || 0,
-    }))
+    const transformedCoders: Coder[] = codersList.map((coder: any) => {
+      const roles: string[] = coder.roles || (coder.role ? [coder.role] : [])
+      const isAlsoManager = roles.includes('manager')
+      const baseName = coder.name || coder.username || 'Unknown'
+      return {
+        id: coder.id || coder._id || '',
+        name: isAlsoManager ? `${baseName} (Manager + Coder)` : baseName,
+        email: coder.email || '',
+        avatar_url: coder.avatar_url || coder.avatarUrl || coder.avatar || '',
+        assigned_tasks: coder.assigned_tasks || 0,
+      }
+    })
 
+    // Safety: ensure current user appears if they have coder membership but list lagged
     if (user?.id) {
-      const managerAlreadyInList = transformedCoders.some((c) => c.id === user.id)
-      if (!managerAlreadyInList) {
+      const alreadyInList = transformedCoders.some((c) => c.id === user.id)
+      if (!alreadyInList) {
         transformedCoders.unshift({
           id: user.id,
-          name: `${(user as any).username || (user as any).name || 'Me'} (Manager)`,
+          name: `${(user as any).username || (user as any).name || 'Me'} (Me)`,
           email: user.email || '',
           avatar_url: user.avatar || '',
           assigned_tasks: 0,

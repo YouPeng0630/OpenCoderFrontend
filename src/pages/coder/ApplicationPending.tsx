@@ -30,11 +30,12 @@ export function ApplicationPending() {
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
 
   useEffect(() => {
-    // If user already has a project_id, they've been approved
-    if (user?.project_id) {
-      console.log('✅ User already has project_id, redirecting to workspace...')
+    // Don't force /coder — user may already be a manager on another project.
+    // Hub lets them pick the right membership/role.
+    if (user?.project_id && user?.role === 'coder') {
+      console.log('✅ Coder active project set, redirecting to Hub to confirm...')
       setTimeout(() => {
-        window.location.href = '/coder'
+        window.location.href = '/hub'
       }, 1000)
       return
     }

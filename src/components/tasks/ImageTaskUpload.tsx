@@ -1,6 +1,6 @@
 /**
  * ImageTaskUpload Component
- * 图片任务上传组件
+ * Multi-file resumable upload: browser → Google Drive, metadata → backend
  */
 
 import { useState } from "react";
@@ -9,7 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getToken } from "@/lib/storage";
+import {
+  uploadMediaBatch,
+  formatDriveAuthError,
+  type MediaUploadItemResult,
+} from "@/lib/mediaUpload";
 
 interface ImageTaskUploadProps {
   projectId: string;
@@ -17,108 +21,121 @@ interface ImageTaskUploadProps {
   onCancel?: () => void;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const MAX_SIZE = 10 * 1024 * 1024;
 
 export function ImageTaskUpload({ projectId, onSuccess, onCancel }: ImageTaskUploadProps) {
   const [title, setTitle] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string>("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string>("");
+  const [progressText, setProgressText] = useState("");
+  const [error, setError] = useState("");
+  const [fileErrors, setFileErrors] = useState<string[]>([]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
 
     setError("");
+    setFileErrors([]);
 
-    // 验证文件类型
-    if (!file.type.startsWith('image/')) {
-      setError('Please select an image file (PNG, JPG, GIF, WebP)');
+    const valid: File[] = [];
+    const errors: string[] = [];
+
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) {
+        errors.push(`${file.name}: not an image`);
+        continue;
+      }
+      if (file.size > MAX_SIZE) {
+        errors.push(`${file.name}: exceeds 10MB`);
+        continue;
+      }
+      valid.push(file);
+    }
+
+    if (errors.length) setFileErrors(errors);
+    if (!valid.length) {
+      setError("Please select valid image files (PNG, JPG, GIF, WebP up to 10MB)");
       return;
     }
 
-    // 验证文件大小 (10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('Image size must be less than 10MB');
-      return;
-    }
+    setSelectedFiles(valid);
+    Promise.all(
+      valid.map(
+        (file) =>
+          new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          })
+      )
+    ).then(setPreviews);
 
-    setSelectedFile(file);
-    
-    // 生成预览
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setPreview(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
-  const handleRemoveFile = () => {
-    setSelectedFile(null);
-    setPreview("");
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    setPreviews((prev) => prev.filter((_, i) => i !== index));
     setError("");
+  };
+
+  const handleClearAll = () => {
+    setSelectedFiles([]);
+    setPreviews([]);
+    setError("");
+    setFileErrors([]);
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) {
-      setError('Please select an image');
+    if (!selectedFiles.length) {
+      setError("Please select at least one image");
       return;
     }
 
     setUploading(true);
     setError("");
-    const token = getToken();
+    setFileErrors([]);
+    setProgressText(`0 / ${selectedFiles.length}`);
 
-    if (!token) {
-      setError('Not authenticated. Please login again.');
-      setUploading(false);
-      return;
-    }
-
+    let completed = 0;
     try {
-      const formData = new FormData();
-      formData.append('title', title.trim() || selectedFile.name);
-      formData.append('image', selectedFile);
-      formData.append('tags', JSON.stringify([]));
+      const results = await uploadMediaBatch({
+        projectId,
+        mediaType: "image",
+        files: selectedFiles,
+        title: title.trim() || undefined,
+        concurrency: 3,
+        onFileComplete: () => {
+          completed += 1;
+          setProgressText(`${completed} / ${selectedFiles.length}`);
+        },
+      });
 
-      const response = await fetch(
-        `${API_BASE_URL}/api/projects/${projectId}/tasks/upload-image?token=${encodeURIComponent(token)}`,
-        {
-          method: 'POST',
-          body: formData,
-        }
-      );
+      const failed = results.filter((r: MediaUploadItemResult) => !r.success);
+      const succeeded = results.filter((r) => r.success);
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Upload failed' }));
-        throw new Error(errorData.detail || 'Upload failed');
+      if (succeeded.length) {
+        setTitle("");
+        setSelectedFiles([]);
+        setPreviews([]);
+        onSuccess();
       }
 
-      const result = await response.json();
-      console.log('✅ Image task created:', result);
-      
-      // 清空表单
-      setTitle("");
-      setSelectedFile(null);
-      setPreview("");
-      
-      // 通知父组件
-      onSuccess();
-      
-    } catch (error: any) {
-      console.error('Upload error:', error);
-      
-      const errorMessage = error.message || 'Failed to upload image task. Please try again.';
-      
-      // 检查是否是 Google 凭证问题
-      if (errorMessage.includes('credentials') || errorMessage.includes('Drive access')) {
-        setError(`🔐 Google Drive Authorization Required\n\n${errorMessage}\n\n📝 Steps to fix:\n1. Click your profile icon (top right)\n2. Select "Sign out"\n3. Visit: https://myaccount.google.com/permissions\n4. Remove "OpenCoder" access\n5. Login again with Google\n6. Grant Google Drive permission`);
-      } else {
-        setError(errorMessage);
+      if (failed.length) {
+        setFileErrors(failed.map((r) => `${r.file.name}: ${r.error}`));
+        setError(
+          succeeded.length
+            ? `${succeeded.length} uploaded, ${failed.length} failed`
+            : formatDriveAuthError(failed[0]?.error || "Upload failed")
+        );
       }
+    } catch (err: any) {
+      setError(formatDriveAuthError(err?.message || "Failed to upload image tasks"));
     } finally {
       setUploading(false);
+      setProgressText("");
     }
   };
 
@@ -127,7 +144,7 @@ export function ImageTaskUpload({ projectId, onSuccess, onCancel }: ImageTaskUpl
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold flex items-center gap-2">
           <ImageIcon className="h-5 w-5" />
-          Upload Image Task
+          Upload Image Tasks
         </h3>
         {onCancel && (
           <Button variant="ghost" size="sm" onClick={onCancel}>
@@ -135,135 +152,143 @@ export function ImageTaskUpload({ projectId, onSuccess, onCancel }: ImageTaskUpl
           </Button>
         )}
       </div>
-      
+
       <div className="space-y-4">
-        {/* 任务标题（可选） */}
         <div>
           <Label htmlFor="task-title">Task Title (Optional)</Label>
           <Input
             id="task-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Leave empty to use image filename"
+            placeholder="Leave empty to use filenames"
             className="mt-1"
             disabled={uploading}
           />
           <p className="text-xs text-gray-500 mt-1">
-            If not provided, the image filename will be used as the task title
+            For multiple files, title is used as a prefix when provided
           </p>
         </div>
 
-        {/* 图片上传区域 */}
         <div>
-          <Label>Image File *</Label>
+          <Label>Image Files *</Label>
           <div className="mt-2">
-            {!selectedFile ? (
-              <>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  id="image-upload"
-                  disabled={uploading}
-                />
-                <label
-                  htmlFor="image-upload"
-                  className={`flex items-center justify-center w-full h-48 border-2 border-dashed rounded-lg transition-colors ${
-                    uploading 
-                      ? 'border-gray-200 cursor-not-allowed' 
-                      : 'border-gray-300 cursor-pointer hover:border-primary hover:bg-gray-50'
-                  }`}
-                >
-                  <div className="text-center">
-                    <Upload className="h-12 w-12 mx-auto text-gray-400 mb-3" />
-                    <p className="text-sm font-medium text-gray-700 mb-1">
-                      Click to upload image
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      PNG, JPG, GIF, WebP up to 10MB
-                    </p>
-                  </div>
-                </label>
-              </>
-            ) : (
-              <div className="relative border-2 border-gray-200 rounded-lg overflow-hidden">
-                <img 
-                  src={preview} 
-                  alt="Preview" 
-                  className="w-full h-64 object-contain bg-gray-50" 
-                />
-                {!uploading && (
-                  <button
-                    onClick={handleRemoveFile}
-                    className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-colors"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-                <div className="p-2 bg-gray-50 border-t">
-                  <p className="text-xs text-gray-600 truncate">
-                    {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
-                  </p>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+              id="image-upload"
+              disabled={uploading}
+            />
+            <label
+              htmlFor="image-upload"
+              className={`flex items-center justify-center w-full h-36 border-2 border-dashed rounded-lg transition-colors ${
+                uploading
+                  ? "border-gray-200 cursor-not-allowed"
+                  : "border-gray-300 cursor-pointer hover:border-primary hover:bg-gray-50"
+              }`}
+            >
+              <div className="text-center">
+                <Upload className="h-10 w-10 mx-auto text-gray-400 mb-2" />
+                <p className="text-sm font-medium text-gray-700 mb-1">
+                  Click to select images (multiple)
+                </p>
+                <p className="text-xs text-gray-500">PNG, JPG, GIF, WebP up to 10MB each</p>
+              </div>
+            </label>
+
+            {selectedFiles.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-600">{selectedFiles.length} file(s) selected</p>
+                  {!uploading && (
+                    <Button variant="ghost" size="sm" onClick={handleClearAll}>
+                      Clear all
+                    </Button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                  {selectedFiles.map((file, index) => (
+                    <div
+                      key={`${file.name}-${index}`}
+                      className="relative border rounded-lg overflow-hidden bg-gray-50"
+                    >
+                      {previews[index] ? (
+                        <img
+                          src={previews[index]}
+                          alt={file.name}
+                          className="w-full h-28 object-contain"
+                        />
+                      ) : (
+                        <div className="h-28 flex items-center justify-center text-xs text-gray-400">
+                          Loading…
+                        </div>
+                      )}
+                      {!uploading && (
+                        <button
+                          onClick={() => handleRemoveFile(index)}
+                          className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                      <p className="text-xs text-gray-600 truncate px-2 py-1 border-t">
+                        {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
           </div>
         </div>
 
-        {/* 错误提示 */}
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm text-red-800 font-medium mb-2">⚠️ Upload Failed</p>
+            <p className="text-sm text-red-800 font-medium mb-2">Upload issue</p>
             <div className="text-sm text-red-700 whitespace-pre-wrap">{error}</div>
-            {error.includes('credentials') && (
-              <a
-                href="https://myaccount.google.com/permissions"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-block mt-3 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded hover:bg-red-700 transition-colors"
-              >
-                Open Google Permissions →
-              </a>
+            {fileErrors.length > 0 && (
+              <ul className="mt-2 text-xs text-red-600 list-disc pl-4 space-y-1">
+                {fileErrors.map((msg) => (
+                  <li key={msg}>{msg}</li>
+                ))}
+              </ul>
             )}
           </div>
         )}
 
-        {/* 操作按钮 */}
         <div className="flex gap-2">
           <Button
             onClick={handleUpload}
-            disabled={!selectedFile || uploading}
+            disabled={!selectedFiles.length || uploading}
             className="flex-1"
           >
             {uploading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Uploading to Google Drive...
+                Uploading {progressText}…
               </>
             ) : (
               <>
                 <ImageIcon className="h-4 w-4 mr-2" />
-                Create Image Task
+                Upload {selectedFiles.length || ""} Image Task
+                {selectedFiles.length === 1 ? "" : "s"}
               </>
             )}
           </Button>
-          
+
           {onCancel && (
-            <Button
-              variant="outline"
-              onClick={onCancel}
-              disabled={uploading}
-            >
+            <Button variant="outline" onClick={onCancel} disabled={uploading}>
               Cancel
             </Button>
           )}
         </div>
 
-        {/* 提示信息 */}
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-xs text-blue-700">
-            💡 Images will be stored in Manager's Google Drive and automatically shared with all project members.
+            Files upload directly to Manager&apos;s Google Drive (resumable). The server only
+            stores task metadata.
           </p>
         </div>
       </div>
