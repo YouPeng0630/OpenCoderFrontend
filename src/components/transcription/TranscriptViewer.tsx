@@ -2,7 +2,7 @@
  * TranscriptViewer
  *
  * Two coding modes:
- *   Segment – click / shift-click to select a range of segments
+ *   Segment – click, shift-click, or hold & drag to select a range of segments
  *   Word    – horizontal timeline; hold left-button and drag to rubber-band
  *             select words, then apply labels
  */
@@ -338,6 +338,12 @@ export function TranscriptViewer({ projectId, taskId, tagGroups, userId }: Trans
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
+  // Segment drag-select (same idea as word rubber-band)
+  const isSegDragging = useRef(false);
+  const dragStartSeg = useRef<number | null>(null);
+  const [dragHoverSeg, setDragHoverSeg] = useState<number | null>(null);
+  const skipNextSegClick = useRef(false);
+
   // ── Load ─────────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
@@ -358,16 +364,56 @@ export function TranscriptViewer({ projectId, taskId, tagGroups, userId }: Trans
 
   useEffect(() => { load(); }, [load]);
 
+  // Finalize segment drag on mouseup anywhere
+  useEffect(() => {
+    function onUp() {
+      if (!isSegDragging.current || dragStartSeg.current === null || dragHoverSeg === null) {
+        isSegDragging.current = false;
+        dragStartSeg.current = null;
+        return;
+      }
+      const a = Math.min(dragStartSeg.current, dragHoverSeg);
+      const b = Math.max(dragStartSeg.current, dragHoverSeg);
+      isSegDragging.current = false;
+      dragStartSeg.current = null;
+      setDragHoverSeg(null);
+      // Multi-segment drag: suppress the trailing click that would collapse to one
+      if (a !== b) skipNextSegClick.current = true;
+      buildSegSel(a, b);
+      setSelectedLabels([]);
+      setCodingNotes("");
+    }
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [dragHoverSeg, transcript]);
+
   // ── Segment selection ────────────────────────────────────────────────────
 
   function handleSegmentClick(idx: number, e: React.MouseEvent) {
     if (mode !== "segment") return;
+    if (skipNextSegClick.current) {
+      skipNextSegClick.current = false;
+      return;
+    }
     if (e.shiftKey && selection?.mode === "segment" && selection.startSeg !== undefined) {
       buildSegSel(Math.min(selection.startSeg, idx), Math.max(selection.startSeg, idx));
     } else {
       buildSegSel(idx, idx);
     }
     setSelectedLabels([]); setCodingNotes("");
+  }
+
+  function handleSegMouseDown(idx: number, e: React.MouseEvent) {
+    if (mode !== "segment" || e.button !== 0 || e.shiftKey) return;
+    e.preventDefault(); // avoid native text selection while dragging
+    isSegDragging.current = true;
+    dragStartSeg.current = idx;
+    setDragHoverSeg(idx);
+  }
+
+  function handleSegMouseEnter(idx: number) {
+    if (!isSegDragging.current || dragStartSeg.current === null) return;
+    setDragHoverSeg(idx);
   }
 
   function buildSegSel(a: number, b: number) {
@@ -470,6 +516,11 @@ export function TranscriptViewer({ projectId, taskId, tagGroups, userId }: Trans
   }
 
   function isSegSelected(segIdx: number) {
+    if (dragStartSeg.current !== null && dragHoverSeg !== null) {
+      const a = Math.min(dragStartSeg.current, dragHoverSeg);
+      const b = Math.max(dragStartSeg.current, dragHoverSeg);
+      return segIdx >= a && segIdx <= b;
+    }
     if (!selection || selection.mode !== "segment") return false;
     return segIdx >= (selection.startSeg ?? 0) && segIdx <= (selection.endSeg ?? 0);
   }
@@ -582,7 +633,7 @@ export function TranscriptViewer({ projectId, taskId, tagGroups, userId }: Trans
         {codings.length === 0 ? (
           <p className="text-xs text-gray-400 px-1">
             {mode === "segment"
-              ? "Click a segment to start."
+              ? "Click or drag segments to start."
               : "Drag on the timeline to select words."}
           </p>
         ) : (
@@ -721,7 +772,14 @@ export function TranscriptViewer({ projectId, taskId, tagGroups, userId }: Trans
           ) : (
             /* ── Segment mode ────────────────────────────────── */
             <div className="flex flex-col md:flex-row">
-              <div className="flex-1 overflow-y-auto max-h-96 p-2 space-y-0.5">
+              <div
+                className={`flex-1 overflow-y-auto max-h-96 p-2 space-y-0.5 ${
+                  dragHoverSeg !== null ? "select-none" : ""
+                }`}
+              >
+                <p className="text-xs text-gray-400 px-1 mb-1">
+                  Click, Shift+click, or hold & drag to select multiple
+                </p>
                 {transcript.segments.map((seg) => {
                   const segCodings = getSegCodings(seg.index);
                   const selected   = isSegSelected(seg.index);
@@ -730,6 +788,8 @@ export function TranscriptViewer({ projectId, taskId, tagGroups, userId }: Trans
                   return (
                     <div
                       key={seg.index}
+                      onMouseDown={(e) => handleSegMouseDown(seg.index, e)}
+                      onMouseEnter={() => handleSegMouseEnter(seg.index)}
                       onClick={(e) => handleSegmentClick(seg.index, e)}
                       className={`flex gap-2 p-1.5 rounded cursor-pointer transition-colors border ${
                         selected

@@ -16,6 +16,8 @@ import { PDFTaskUpload } from '@/components/tasks/PDFTaskUpload'
 import { MultimodalTaskUpload } from '@/components/tasks/MultimodalTaskUpload'
 import { parseBibliographyFile, BibliographicEntry, bibliographyToTaskPayload } from '@/lib/bibliography-parser'
 import { TranscriptControl } from '@/components/transcription/TranscriptControl'
+import { TaskMediaPreview } from '@/components/tasks/TaskMediaPreview'
+import { TaskTypeFilter, taskTypeFilterParam } from '@/components/tasks/TaskTypeFilter'
 
 interface Task {
   id: string
@@ -28,6 +30,13 @@ interface Task {
   createdAt: string
   task_type?: string
   transcription_status?: string
+  payload?: {
+    text?: string | null
+    image?: any
+    video?: any
+    audio?: any
+    pdf?: any
+  }
 }
 
 type UploadMode = 'csv' | 'folder' | 'image' | 'video' | 'audio' | 'bibliography' | 'pdf' | 'multimodal'
@@ -66,7 +75,7 @@ export function ManagerTasks() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'pending' | 'in-progress' | 'completed'>('all')
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -130,7 +139,8 @@ export function ManagerTasks() {
       })
       const backendStatus = toBackendStatus(filter)
       if (backendStatus) params.set('status', backendStatus)
-      if (typeFilter !== 'all') params.set('task_type', typeFilter)
+      const typeParam = taskTypeFilterParam(typeFilter)
+      if (typeParam) params.set('task_type', typeParam)
       if (dateFrom) params.set('date_from', dateFrom)
       if (dateTo) params.set('date_to', dateTo)
       if (debouncedSearch) params.set('search', debouncedSearch)
@@ -163,6 +173,7 @@ export function ManagerTasks() {
         createdAt: task.created_at || new Date().toISOString(),
         task_type: task.task_type,
         transcription_status: task.transcription_status,
+        payload: task.payload || undefined,
       }))
 
       setTasks(transformedTasks)
@@ -408,9 +419,9 @@ export function ManagerTasks() {
       
       console.log('🗑️ Deleting task:', taskId)
       
-      // Note: No token needed for delete endpoint
+      const token = getToken()
       const response = await fetch(
-        `${apiBaseUrl}/api/projects/${user.project_id}/tasks/${taskId}`,
+        `${apiBaseUrl}/api/projects/${user.project_id}/tasks/${taskId}?token=${encodeURIComponent(token || '')}`,
         {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
@@ -549,7 +560,7 @@ export function ManagerTasks() {
   }
 
   const safePage = Math.min(currentPage, totalPages)
-  const hasActiveFilter = filter !== 'all' || typeFilter !== 'all' || !!dateFrom || !!dateTo || !!searchQuery
+  const hasActiveFilter = filter !== 'all' || typeFilter.size > 0 || !!dateFrom || !!dateTo || !!searchQuery
 
   const getStatusColor = (status: Task['status']) => {
     switch (status) {
@@ -615,20 +626,13 @@ export function ManagerTasks() {
           />
         </div>
 
-        <select
-          value={typeFilter}
-          onChange={e => { setTypeFilter(e.target.value); setCurrentPage(1) }}
-          className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          <option value="all">All Types</option>
-          <option value="text">Text</option>
-          <option value="image">Image</option>
-          <option value="video">Video</option>
-          <option value="audio">Audio</option>
-          <option value="bibliographic">Bibliographic</option>
-          <option value="pdf_document_coding">PDF</option>
-          <option value="multimodal">Multimodal</option>
-        </select>
+        <TaskTypeFilter
+          selected={typeFilter}
+          onChange={(next) => {
+            setTypeFilter(next)
+            setCurrentPage(1)
+          }}
+        />
 
         <div className="flex flex-col gap-0.5">
           <label className="text-xs text-gray-400">Created from</label>
@@ -664,7 +668,7 @@ export function ManagerTasks() {
           <button
             onClick={() => {
               setSearchQuery('')
-              setTypeFilter('all')
+              setTypeFilter(new Set())
               setDateFrom('')
               setDateTo('')
               setFilter('all')
@@ -706,32 +710,39 @@ export function ManagerTasks() {
         <div className="space-y-4">
           {tasks.map((task) => (
             <Card key={task.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <CardTitle className="text-lg">{task.title}</CardTitle>
-                      <Badge className={getStatusColor(task.status)}>
-                        {task.status}
-                      </Badge>
+              <CardHeader className="pb-2">
+                <div className="flex items-start gap-3">
+                  <TaskMediaPreview taskType={task.task_type} payload={task.payload} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <CardTitle className="text-lg truncate">{task.title}</CardTitle>
+                          <Badge className={getStatusColor(task.status)}>
+                            {task.status}
+                          </Badge>
+                        </div>
+                        {task.description ? (
+                          <CardDescription className="line-clamp-2">{task.description}</CardDescription>
+                        ) : null}
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditTask(task.id)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteTask(task.id)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
                     </div>
-                    <CardDescription>{task.description}</CardDescription>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleEditTask(task.id)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeleteTask(task.id)}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
                   </div>
                 </div>
               </CardHeader>
@@ -746,11 +757,20 @@ export function ManagerTasks() {
                   <span>Created: {new Date(task.createdAt).toLocaleDateString()}</span>
                   {task.task_type && (
                     <span className="capitalize text-xs bg-gray-100 px-2 py-0.5 rounded">
-                      {task.task_type.replace(/_/g, ' ')}
+                      {task.task_type === 'multimodal'
+                        ? (
+                            [
+                              task.payload?.image && 'image',
+                              task.payload?.video && 'video',
+                              task.payload?.audio && 'audio',
+                              task.payload?.pdf && 'pdf',
+                              task.payload?.text && 'text',
+                            ].filter(Boolean).join(' · ') || 'mixed'
+                          )
+                        : task.task_type.replace(/_/g, ' ')}
                     </span>
                   )}
                 </div>
-                {/* Transcript control for audio/video tasks */}
                 {(task.task_type === 'audio' || task.task_type === 'video' || task.task_type === 'multimodal') && user?.project_id && (
                   <TranscriptControl
                     projectId={user.project_id}
@@ -936,9 +956,9 @@ export function ManagerTasks() {
                       }`}
                     >
                       <Layers className="h-10 w-10 text-indigo-600 mb-3" />
-                      <h3 className="font-semibold text-lg mb-2">Multimodal</h3>
+                      <h3 className="font-semibold text-lg mb-2">Mixed files</h3>
                       <p className="text-sm text-gray-500">
-                        One task with image + video + audio combined
+                        Drop many files — each file becomes its own typed task
                       </p>
                     </div>
                     

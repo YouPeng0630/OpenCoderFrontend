@@ -11,8 +11,6 @@ import {
   UserPlus,
   FolderKanban,
   LogOut,
-  Briefcase,
-  Code2,
 } from 'lucide-react'
 
 interface HubProject {
@@ -178,14 +176,12 @@ export function ProjectHub() {
                         <p className="text-xs text-gray-400 mt-0.5">/{p.project_slug}</p>
                         <div className="flex flex-wrap gap-1.5 mt-2">
                           {hasManager && (
-                            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 flex items-center gap-1">
-                              <Briefcase className="h-3 w-3" />
+                            <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">
                               Manager
                             </Badge>
                           )}
                           {hasCoder && (
-                            <Badge className="bg-green-100 text-green-700 hover:bg-green-100 flex items-center gap-1">
-                              <Code2 className="h-3 w-3" />
+                            <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
                               Coder
                             </Badge>
                           )}
@@ -197,12 +193,10 @@ export function ProjectHub() {
                             size="sm"
                             disabled={enteringKey === `${p.project_id}:manager`}
                             onClick={() => handleEnter(p, 'manager')}
-                            className="gap-1.5"
+                            className="bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-600"
                           >
-                            {enteringKey === `${p.project_id}:manager` ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Briefcase className="h-3.5 w-3.5" />
+                            {enteringKey === `${p.project_id}:manager` && (
+                              <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
                             )}
                             Enter as Manager
                           </Button>
@@ -210,15 +204,12 @@ export function ProjectHub() {
                         {hasCoder && (
                           <Button
                             size="sm"
-                            variant={hasManager ? 'outline' : 'default'}
                             disabled={enteringKey === `${p.project_id}:coder`}
                             onClick={() => handleEnter(p, 'coder')}
-                            className="gap-1.5"
+                            className="bg-green-600 text-white hover:bg-green-700 focus-visible:ring-green-600"
                           >
-                            {enteringKey === `${p.project_id}:coder` ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Code2 className="h-3.5 w-3.5" />
+                            {enteringKey === `${p.project_id}:coder` && (
+                              <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
                             )}
                             Enter as Coder
                           </Button>

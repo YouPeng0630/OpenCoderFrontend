@@ -9,10 +9,9 @@ import {
   LogOut,
   User,
   ChevronDown,
-  Code,
+  ChevronLeft,
   AlertTriangle,
   StickyNote,
-  LayoutGrid,
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Avatar from '@radix-ui/react-avatar'
@@ -24,12 +23,34 @@ export function CoderLayout() {
   const navigate = useNavigate()
 
   const navigation = [
-    { name: 'Projects', href: '/hub', icon: LayoutGrid },
     { name: 'Tasks', href: '/coder/tasks', icon: CheckSquare },
     { name: 'My Progress', href: '/coder/progress', icon: TrendingUp },
     { name: 'My Notes', href: '/coder/notes', icon: StickyNote },
     { name: 'Consensus', href: '/coder/consensus', icon: AlertTriangle },
   ]
+
+  const brand = (
+    <div className="inline-flex items-center gap-2">
+      <img src="/logo.png" alt="OpenCoder" className="h-8 w-8" />
+      <span className="text-xl font-bold text-gray-900">OpenCoder</span>
+    </div>
+  )
+
+  const projectsBack = (onNavigate?: () => void) => (
+    <div className="mb-3 pb-3 border-b border-gray-200">
+      <button
+        type="button"
+        onClick={() => {
+          onNavigate?.()
+          navigate('/hub')
+        }}
+        className="w-full group flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+      >
+        <ChevronLeft className="mr-2 h-4 w-4 flex-shrink-0" />
+        All Projects
+      </button>
+    </div>
+  )
 
   const handleLogout = () => {
     logout()
@@ -41,33 +62,30 @@ export function CoderLayout() {
       {/* Sidebar for desktop */}
       <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-64 md:flex-col">
         <div className="flex flex-col flex-grow bg-white border-r border-gray-200">
-          {/* Logo */}
-          <div className="flex items-center h-16 flex-shrink-0 px-4 border-b border-gray-200">
-            <img src="/logo.png" alt="OpenCoder" className="h-8 w-8" />
-            <span className="ml-2 text-xl font-bold text-gray-900">OpenCoder</span>
-          </div>
-
           {/* Navigation */}
-          <nav className="flex-1 px-2 py-4 space-y-1">
-            {navigation.map((item) => {
-              const Icon = item.icon
-              return (
-                <NavLink
-                  key={item.name}
-                  to={item.href}
-                  className={({ isActive }) =>
-                    `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                      isActive
-                        ? 'bg-primary text-white'
-                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
-                    }`
-                  }
-                >
-                  <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                  {item.name}
-                </NavLink>
-              )
-            })}
+          <nav className="flex-1 px-2 py-4">
+            {projectsBack()}
+            <div className="space-y-1">
+              {navigation.map((item) => {
+                const Icon = item.icon
+                return (
+                  <NavLink
+                    key={item.name}
+                    to={item.href}
+                    className={({ isActive }) =>
+                      `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                        isActive
+                          ? 'bg-primary text-white'
+                          : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                      }`
+                    }
+                  >
+                    <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                    {item.name}
+                  </NavLink>
+                )
+              })}
+            </div>
           </nav>
         </div>
       </aside>
@@ -95,31 +113,30 @@ export function CoderLayout() {
 
             {/* Mobile navigation */}
             <div className="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
-              <div className="flex-shrink-0 flex items-center px-4">
-                <img src="/logo.png" alt="OpenCoder" className="h-8 w-8" />
-                <span className="ml-2 text-xl font-bold text-gray-900">OpenCoder</span>
-              </div>
-              <nav className="mt-5 px-2 space-y-1">
-                {navigation.map((item) => {
-                  const Icon = item.icon
-                  return (
-                    <NavLink
-                      key={item.name}
-                      to={item.href}
-                      onClick={() => setSidebarOpen(false)}
-                      className={({ isActive }) =>
-                        `group flex items-center px-3 py-2 text-sm font-medium rounded-md ${
-                          isActive
-                            ? 'bg-primary text-white'
-                            : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
-                        }`
-                      }
-                    >
-                      <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
-                      {item.name}
-                    </NavLink>
-                  )
-                })}
+              <nav className="mt-2 px-2">
+                {projectsBack(() => setSidebarOpen(false))}
+                <div className="space-y-1">
+                  {navigation.map((item) => {
+                    const Icon = item.icon
+                    return (
+                      <NavLink
+                        key={item.name}
+                        to={item.href}
+                        onClick={() => setSidebarOpen(false)}
+                        className={({ isActive }) =>
+                          `group flex items-center px-3 py-2 text-sm font-medium rounded-md ${
+                            isActive
+                              ? 'bg-primary text-white'
+                              : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                          }`
+                        }
+                      >
+                        <Icon className="mr-3 h-5 w-5 flex-shrink-0" />
+                        {item.name}
+                      </NavLink>
+                    )
+                  })}
+                </div>
               </nav>
             </div>
           </div>
@@ -140,11 +157,7 @@ export function CoderLayout() {
           </button>
 
           <div className="flex-1 px-4 flex justify-between items-center">
-            <div className="flex-1">
-              <h1 className="text-2xl font-semibold text-gray-900">
-                {/* Page title will be set by child routes */}
-              </h1>
-            </div>
+            <div className="flex-1">{brand}</div>
 
             {/* User menu */}
             <div className="ml-4 flex items-center gap-3 md:ml-6">

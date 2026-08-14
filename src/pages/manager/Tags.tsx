@@ -13,6 +13,7 @@ interface TagOption {
   label: string
   order: number
   active: boolean
+  description?: string
 }
 
 interface TagGroup {
@@ -27,12 +28,186 @@ interface TagGroup {
   options: TagOption[]
 }
 
+type OptionDiff = {
+  id: string
+  label: string
+  description?: string
+}
+
+type TagGroupChangePreview = {
+  isCreate: boolean
+  groupName: string
+  nameChanged?: { from: string; to: string }
+  descriptionChanged?: { from: string; to: string }
+  typeChanged?: { from: string; to: string }
+  requiredChanged?: { from: boolean; to: boolean }
+  activeChanged?: { from: boolean; to: boolean }
+  beforeOptions: OptionDiff[]
+  afterOptions: OptionDiff[]
+  addedOptions: OptionDiff[]
+  removedOptions: OptionDiff[]
+  renamedOptions: Array<{ from: string; to: string }>
+  optionDescriptionChanged: Array<{
+    label: string
+    from: string
+    to: string
+  }>
+}
+
+function normalizeText(v: unknown): string {
+  if (v == null) return ''
+  const s = String(v).trim()
+  if (!s || s === 'None' || s === 'null' || s === 'undefined') return ''
+  return s
+}
+
+function toOptionDiff(o: TagOption): OptionDiff {
+  return {
+    id: o.option_id,
+    label: normalizeText(o.label) || 'Untitled',
+    description: normalizeText(o.description),
+  }
+}
+
+function buildGroupChangePreview(
+  before: TagGroup | null,
+  after: TagGroup
+): TagGroupChangePreview {
+  if (!before) {
+    return {
+      isCreate: true,
+      groupName: after.name,
+      beforeOptions: [],
+      afterOptions: (after.options || []).map(toOptionDiff),
+      addedOptions: (after.options || []).map(toOptionDiff),
+      removedOptions: [],
+      renamedOptions: [],
+      optionDescriptionChanged: [],
+    }
+  }
+
+  const beforeMap = new Map((before.options || []).map((o) => [o.option_id, o]))
+  const afterMap = new Map((after.options || []).map((o) => [o.option_id, o]))
+
+  const addedOptions: OptionDiff[] = []
+  const removedOptions: OptionDiff[] = []
+  const renamedOptions: Array<{ from: string; to: string }> = []
+  const optionDescriptionChanged: Array<{ label: string; from: string; to: string }> = []
+
+  for (const [id, opt] of afterMap) {
+    if (!beforeMap.has(id)) {
+      addedOptions.push(toOptionDiff(opt))
+    }
+  }
+  for (const [id, opt] of beforeMap) {
+    if (!afterMap.has(id)) {
+      removedOptions.push(toOptionDiff(opt))
+    }
+  }
+  for (const [id, afterOpt] of afterMap) {
+    const beforeOpt = beforeMap.get(id)
+    if (!beforeOpt) continue
+    const beforeLabel = normalizeText(beforeOpt.label)
+    const afterLabel = normalizeText(afterOpt.label)
+    if (beforeLabel !== afterLabel) {
+      renamedOptions.push({ from: beforeLabel, to: afterLabel })
+    }
+    const bd = normalizeText(beforeOpt.description)
+    const ad = normalizeText(afterOpt.description)
+    if (bd !== ad) {
+      optionDescriptionChanged.push({
+        label: afterLabel || beforeLabel,
+        from: bd,
+        to: ad,
+      })
+    }
+  }
+
+  const beforeDesc = normalizeText(before.description)
+  const afterDesc = normalizeText(after.description)
+
+  return {
+    isCreate: false,
+    groupName: after.name,
+    nameChanged:
+      before.name !== after.name ? { from: before.name, to: after.name } : undefined,
+    descriptionChanged:
+      beforeDesc !== afterDesc ? { from: beforeDesc, to: afterDesc } : undefined,
+    typeChanged:
+      before.type !== after.type ? { from: before.type, to: after.type } : undefined,
+    requiredChanged:
+      before.required !== after.required
+        ? { from: before.required, to: after.required }
+        : undefined,
+    activeChanged:
+      before.active !== after.active
+        ? { from: before.active, to: after.active }
+        : undefined,
+    beforeOptions: (before.options || []).map(toOptionDiff),
+    afterOptions: (after.options || []).map(toOptionDiff),
+    addedOptions,
+    removedOptions,
+    renamedOptions,
+    optionDescriptionChanged,
+  }
+}
+
+function previewHasChanges(p: TagGroupChangePreview): boolean {
+  if (p.isCreate) return true
+  return Boolean(
+    p.nameChanged ||
+      p.descriptionChanged ||
+      p.typeChanged ||
+      p.requiredChanged ||
+      p.activeChanged ||
+      p.addedOptions.length ||
+      p.removedOptions.length ||
+      p.renamedOptions.length ||
+      p.optionDescriptionChanged.length
+  )
+}
+
+function OptionChips({
+  options,
+  tone,
+}: {
+  options: OptionDiff[]
+  tone: 'before' | 'after'
+}) {
+  if (options.length === 0) {
+    return <p className="text-xs text-slate-400">(no tags)</p>
+  }
+  const chip =
+    tone === 'before'
+      ? 'border-slate-200 bg-white text-slate-700'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {options.map((o) => (
+        <div
+          key={o.id}
+          className={`rounded-md border px-2 py-1.5 text-xs ${chip}`}
+        >
+          <p className="font-medium">{o.label}</p>
+          {o.description ? (
+            <p className="mt-0.5 text-[11px] opacity-80 whitespace-pre-wrap">{o.description}</p>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ManagerTags() {
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingGroup, setEditingGroup] = useState<TagGroup | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [preview, setPreview] = useState<TagGroupChangePreview | null>(null)
+  const [changeNote, setChangeNote] = useState('')
   const [toast, setToast] = useState({ open: false, message: '', type: 'success' as 'success' | 'error' })
   const [projectId, setProjectId] = useState<string | null>(null)
   
@@ -40,6 +215,7 @@ export function ManagerTags() {
   const [quickAddDialogOpen, setQuickAddDialogOpen] = useState(false)
   const [quickAddGroupId, setQuickAddGroupId] = useState<string | null>(null)
   const [quickAddOptionLabel, setQuickAddOptionLabel] = useState('')
+  const [quickAddOptionDescription, setQuickAddOptionDescription] = useState('')
 
   // Fetch tag groups
   const fetchTagGroups = async () => {
@@ -64,8 +240,17 @@ export function ManagerTags() {
       
       const data = await response.json()
       console.log('Tag groups data:', data)
-      
-      setTagGroups(Array.isArray(data) ? data : [data])
+
+      const list = (Array.isArray(data) ? data : [data]).map((g: any) => ({
+        ...g,
+        description: normalizeText(g.description),
+        options: (g.options || []).map((o: any) => ({
+          ...o,
+          label: normalizeText(o.label) || 'Untitled',
+          description: normalizeText(o.description),
+        })),
+      }))
+      setTagGroups(list)
     } catch (error) {
       console.error('Error fetching tag groups:', error)
       showToast('Failed to fetch tag groups: ' + (error as Error).message, 'error')
@@ -202,60 +387,86 @@ export function ManagerTags() {
     }
   }
 
-  // Save edited group
-  const saveEditedGroup = async () => {
+  // Open preview before saving
+  const requestSaveEditedGroup = () => {
     if (!editingGroup) return
-    
+
     if (!editingGroup.name.trim()) {
       showToast('Please enter a tag group name', 'error')
       return
     }
 
+    const existing = tagGroups.find((g) => g._id === editingGroup._id) || null
+    const change = buildGroupChangePreview(existing, editingGroup)
+    if (!previewHasChanges(change)) {
+      showToast('No changes to save', 'error')
+      return
+    }
+    setPreview(change)
+    setChangeNote('')
+    setPreviewOpen(true)
+  }
+
+  // Confirm save after preview
+  const confirmSaveEditedGroup = async () => {
+    if (!editingGroup) return
+
+    const note = changeNote.trim()
+    if (!note) {
+      showToast('Please add a note explaining this change', 'error')
+      return
+    }
+
     try {
       setSaving(true)
-      
-      // Update local state first
+
       const existingIndex = tagGroups.findIndex((g) => g._id === editingGroup._id)
       let updatedGroups: TagGroup[]
-      
-      // For new groups, generate group_id from name
-      const groupToSave = existingIndex < 0 
-        ? { ...editingGroup, group_id: generateGroupId(editingGroup.name) }
-        : editingGroup
-      
+
+      const groupToSave =
+        existingIndex < 0
+          ? { ...editingGroup, group_id: generateGroupId(editingGroup.name) }
+          : editingGroup
+
       if (existingIndex < 0) {
         console.log(`Generated group_id: ${groupToSave.group_id} from name: ${editingGroup.name}`)
       }
-      
+
       if (existingIndex >= 0) {
         updatedGroups = [...tagGroups]
         updatedGroups[existingIndex] = groupToSave
       } else {
         updatedGroups = [...tagGroups, groupToSave]
       }
-      
-      // Save to API
+
       const token = getToken()
       if (!token) throw new Error('No authentication token')
-      
+
       const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
-      
+
       const response = await fetch(
         `${apiBaseUrl}/api/projects/${projectId}/tag-groups-overwrite?token=${encodeURIComponent(token)}`,
         {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tag_groups: updatedGroups }),
+          body: JSON.stringify({
+            tag_groups: updatedGroups,
+            change_note: note,
+            change_group_id: groupToSave.group_id,
+          }),
         }
       )
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => null)
         throw new Error(errorData?.detail || `HTTP ${response.status}`)
       }
-      
+
       setTagGroups(updatedGroups)
       showToast(existingIndex >= 0 ? 'Updated successfully' : 'Added successfully', 'success')
+      setPreviewOpen(false)
+      setPreview(null)
+      setChangeNote('')
       setDialogOpen(false)
       setEditingGroup(null)
     } catch (error) {
@@ -269,12 +480,13 @@ export function ManagerTags() {
   // Add tag
   const addOption = () => {
     if (!editingGroup) return
-    
+
     const newOption: TagOption = {
       option_id: `option_${Date.now()}`,
       label: 'New Tag',
       order: (editingGroup.options?.length || 0) + 1,
       active: true,
+      description: '',
     }
     setEditingGroup({
       ...editingGroup,
@@ -308,6 +520,7 @@ export function ManagerTags() {
   const openQuickAddDialog = (groupId: string) => {
     setQuickAddGroupId(groupId)
     setQuickAddOptionLabel('')
+    setQuickAddOptionDescription('')
     setQuickAddDialogOpen(true)
   }
 
@@ -332,6 +545,7 @@ export function ManagerTags() {
         label: quickAddOptionLabel.trim(),
         order: (group.options?.length || 0) + 1,
         active: true,
+        description: quickAddOptionDescription.trim() || '',
       }
 
       // Update group with new option
@@ -365,6 +579,7 @@ export function ManagerTags() {
       setQuickAddDialogOpen(false)
       setQuickAddGroupId(null)
       setQuickAddOptionLabel('')
+      setQuickAddOptionDescription('')
     } catch (error) {
       console.error('Failed to add tag:', error)
       showToast(`Failed to add tag: ${error}`, 'error')
@@ -458,17 +673,23 @@ export function ManagerTags() {
 
               {/* Tags */}
               <CardContent className="border-t pt-6">
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between gap-3">
                   {group.options && group.options.length > 0 ? (
                     <div className="flex-1 flex flex-wrap gap-3">
                       {group.options.map((option) => (
-                        <Badge
-                          key={option.option_id}
-                          variant={option.active ? 'secondary' : 'outline'}
-                          className={`px-4 py-2 text-base ${option.active ? '' : 'text-gray-400'}`}
-                        >
-                          {option.label}
-                        </Badge>
+                        <div key={option.option_id} className="max-w-xs">
+                          <Badge
+                            variant={option.active ? 'secondary' : 'outline'}
+                            className={`px-4 py-2 text-base ${option.active ? '' : 'text-gray-400'}`}
+                          >
+                            {option.label}
+                          </Badge>
+                          {option.description && (
+                            <p className="mt-1 text-xs text-gray-500 line-clamp-2 px-1">
+                              {option.description}
+                            </p>
+                          )}
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -594,22 +815,31 @@ export function ManagerTags() {
 
                   <div className="space-y-3">
                     {editingGroup.options && editingGroup.options.map((option) => (
-                      <div key={option.option_id} className="flex items-center gap-2 p-3 border rounded-md bg-gray-50">
-                        <input
-                          type="text"
-                          value={option.label}
-                          onChange={(e) => updateOption(option.option_id, 'label', e.target.value)}
-                          className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary"
-                          placeholder="Tag name"
+                      <div key={option.option_id} className="p-3 border rounded-md bg-gray-50 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={option.label}
+                            onChange={(e) => updateOption(option.option_id, 'label', e.target.value)}
+                            className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder="Tag name"
+                          />
+                          <Button
+                            onClick={() => deleteOption(option.option_id)}
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <textarea
+                          value={option.description || ''}
+                          onChange={(e) => updateOption(option.option_id, 'description', e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                          rows={2}
+                          placeholder="Optional description (AI annotation hint)"
                         />
-                        <Button
-                          onClick={() => deleteOption(option.option_id)}
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0 text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
                       </div>
                     ))}
                     {(!editingGroup.options || editingGroup.options.length === 0) && (
@@ -625,19 +855,174 @@ export function ManagerTags() {
                   <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
                     Cancel
                   </Button>
-                  <Button onClick={saveEditedGroup} disabled={saving}>
-                    {saving ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      'Save'
-                    )}
+                  <Button onClick={requestSaveEditedGroup} disabled={saving}>
+                    Save
                   </Button>
                 </div>
               </div>
             )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Preview changes before save */}
+      <Dialog
+        open={previewOpen}
+        onOpenChange={(open) => {
+          if (!saving) {
+            setPreviewOpen(open)
+            if (!open) setPreview(null)
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] w-[90vw] max-w-[560px] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl">
+              {preview?.isCreate ? 'Preview: create tag group' : 'Preview: update tag group'}
+            </DialogTitle>
+          </DialogHeader>
+
+          {preview && (
+            <div className="space-y-4 text-sm">
+              <p className="text-slate-800">
+                {preview.isCreate ? 'Creating tag group' : 'Updating tag group'}{' '}
+                <span className="font-semibold text-violet-800">{preview.groupName}</span>
+              </p>
+
+              {preview.nameChanged && (
+                <p>
+                  <span className="text-slate-500">name:</span>{' '}
+                  <span className="line-through text-rose-600">{preview.nameChanged.from}</span>
+                  {' → '}
+                  <span className="font-medium text-emerald-700">{preview.nameChanged.to}</span>
+                </p>
+              )}
+
+              {preview.descriptionChanged && (
+                <p className="text-sm">
+                  <span className="text-slate-500">description:</span>{' '}
+                  <span className="line-through text-rose-600 whitespace-pre-wrap">
+                    {preview.descriptionChanged.from || '(empty)'}
+                  </span>
+                  {' → '}
+                  <span className="font-medium text-emerald-700 whitespace-pre-wrap">
+                    {preview.descriptionChanged.to || '(empty)'}
+                  </span>
+                </p>
+              )}
+
+              {(preview.typeChanged || preview.requiredChanged || preview.activeChanged) && (
+                <div className="space-y-1 text-slate-600">
+                  {preview.typeChanged && (
+                    <p>
+                      type: <span className="line-through text-rose-600">{preview.typeChanged.from}</span>
+                      {' → '}
+                      <span className="text-emerald-700">{preview.typeChanged.to}</span>
+                    </p>
+                  )}
+                  {preview.requiredChanged && (
+                    <p>
+                      required:{' '}
+                      <span className="line-through text-rose-600">
+                        {String(preview.requiredChanged.from)}
+                      </span>
+                      {' → '}
+                      <span className="text-emerald-700">{String(preview.requiredChanged.to)}</span>
+                    </p>
+                  )}
+                  {preview.activeChanged && (
+                    <p>
+                      active:{' '}
+                      <span className="line-through text-rose-600">
+                        {String(preview.activeChanged.from)}
+                      </span>
+                      {' → '}
+                      <span className="text-emerald-700">{String(preview.activeChanged.to)}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {preview.optionDescriptionChanged.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-slate-500">tag descriptions</p>
+                  {preview.optionDescriptionChanged.map((d, i) => (
+                    <p key={i} className="text-sm">
+                      <span className="font-medium text-slate-800">{d.label}:</span>{' '}
+                      <span className="line-through text-rose-600 whitespace-pre-wrap">
+                        {d.from || '(empty)'}
+                      </span>
+                      {' → '}
+                      <span className="font-medium text-emerald-700 whitespace-pre-wrap">
+                        {d.to || '(empty)'}
+                      </span>
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {(preview.addedOptions.length > 0 ||
+                preview.removedOptions.length > 0 ||
+                preview.renamedOptions.length > 0 ||
+                preview.isCreate) && (
+                <div>
+                  <p className="mb-1.5 text-xs font-medium text-slate-500">tags</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-md border border-rose-100 bg-rose-50/40 p-2.5">
+                      <p className="mb-1.5 text-[11px] font-medium text-rose-600">before</p>
+                      <OptionChips options={preview.beforeOptions} tone="before" />
+                    </div>
+                    <div className="rounded-md border border-emerald-100 bg-emerald-50/40 p-2.5">
+                      <p className="mb-1.5 text-[11px] font-medium text-emerald-700">after</p>
+                      <OptionChips options={preview.afterOptions} tone="after" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label className="text-sm font-medium text-gray-700">
+                  Change note <span className="text-red-500">*</span>
+                </Label>
+                <textarea
+                  value={changeNote}
+                  onChange={(e) => setChangeNote(e.target.value)}
+                  className="mt-1.5 w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                  rows={3}
+                  placeholder="Why are you making this change? (shown on Timeline)"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  This note will appear in the project Timeline with this codebook update.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setPreviewOpen(false)
+                    setPreview(null)
+                    setChangeNote('')
+                  }}
+                  disabled={saving}
+                >
+                  Back
+                </Button>
+                <Button
+                  onClick={confirmSaveEditedGroup}
+                  disabled={saving || !changeNote.trim()}
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Confirm Save'
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -666,9 +1051,19 @@ export function ManagerTags() {
                 placeholder="e.g., Positive, Negative, Neutral"
                 autoFocus
               />
-              <p className="text-xs text-gray-500 mt-1.5">
-                This will be added to the selected tag group.
-              </p>
+            </div>
+            <div>
+              <Label htmlFor="option-desc" className="text-sm font-medium text-gray-700">
+                Description (optional)
+              </Label>
+              <textarea
+                id="option-desc"
+                value={quickAddOptionDescription}
+                onChange={(e) => setQuickAddOptionDescription(e.target.value)}
+                className="mt-1.5 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                rows={2}
+                placeholder="Optional — can guide AI annotation"
+              />
             </div>
           </div>
           <div className="flex justify-end gap-3">
@@ -677,6 +1072,7 @@ export function ManagerTags() {
               onClick={() => {
                 setQuickAddDialogOpen(false)
                 setQuickAddOptionLabel('')
+                setQuickAddOptionDescription('')
               }}
             >
               Cancel

@@ -14,6 +14,8 @@ import { ManagerTasks } from '@/pages/manager/Tasks';
 import { ManagerAssignment } from '@/pages/manager/Assignment';
 import { ManagerDatabase } from '@/pages/manager/Database';
 import { ManagerChat } from '@/pages/manager/Chat';
+import { ManagerActivityLogs } from '@/pages/manager/ActivityLogs';
+import { ManagerNotes } from '@/pages/manager/ManagerNotes';
 import { ConsensusResolution } from '@/pages/manager/ConsensusResolution';
 import { Coder } from '@/pages/Coder';
 import { CoderLayout } from '@/pages/coder/CoderLayout';
@@ -86,6 +88,8 @@ function App() {
             <Route path="assignment" element={<ManagerAssignment />} />
             <Route path="chat" element={<ManagerChat />} />
             <Route path="database" element={<ManagerDatabase />} />
+            <Route path="activity" element={<ManagerActivityLogs />} />
+            <Route path="notes" element={<ManagerNotes />} />
             <Route path="consensus/:taskId" element={<ConsensusResolution />} />
           </Route>
 

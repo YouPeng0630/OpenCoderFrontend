@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { UserPlus, Loader2, CheckSquare, Square, AlertCircle, Send, ChevronDown } from 'lucide-react'
+import { TaskTypeFilter, taskTypeFilterParam } from '@/components/tasks/TaskTypeFilter'
 
 interface Coder {
   id: string
@@ -25,9 +26,17 @@ interface Task {
   title: string
   status: string
   created_at?: string
+  task_type?: string
 }
 
 const TASKS_PAGE_SIZE = 200
+
+function formatTaskType(taskType?: string): string {
+  if (!taskType) return ''
+  if (taskType === 'multimodal') return 'Multimodal'
+  if (taskType === 'pdf_document_coding') return 'PDF'
+  return taskType.replace(/_/g, ' ')
+}
 
 export function ManagerAssignment() {
   const { user } = useAuth()
@@ -36,6 +45,9 @@ export function ManagerAssignment() {
   const [taskPage, setTaskPage] = useState(1)
   const [taskTotal, setTaskTotal] = useState(0)
   const [taskPages, setTaskPages] = useState(1)
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
   const [selectedCoder, setSelectedCoder] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -46,9 +58,29 @@ export function ManagerAssignment() {
 
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
 
+  const hasActiveFilter = typeFilter.size > 0 || !!dateFrom || !!dateTo
+
+  const buildTasksQuery = (page: number, token: string) => {
+    const params = new URLSearchParams({
+      token,
+      page: String(page),
+      limit: String(TASKS_PAGE_SIZE),
+      status: 'open',
+    })
+    const typeParam = taskTypeFilterParam(typeFilter)
+    if (typeParam) params.set('task_type', typeParam)
+    if (dateFrom) params.set('date_from', dateFrom)
+    if (dateTo) params.set('date_to', dateTo)
+    return params
+  }
+
   useLayoutEffect(() => {
     if (user?.project_id) {
       setTaskPage(1)
+      setTypeFilter(new Set())
+      setDateFrom('')
+      setDateTo('')
+      setSelectedTasks(new Set())
     }
   }, [user?.project_id])
 
@@ -80,14 +112,16 @@ export function ManagerAssignment() {
         title: task.title || task.name || 'Untitled Task',
         status: task.status || 'open',
         created_at: task.created_at || task.createdAt || '',
+        task_type: task.task_type || task.taskType || '',
       }))
 
     return { transformedTasks, total, pages }
   }
 
   const fetchTasksPage = async (projectId: string, page: number, token: string) => {
+    const params = buildTasksQuery(page, token)
     const tasksResponse = await fetch(
-      `${apiBaseUrl}/api/projects/${projectId}/tasks?token=${encodeURIComponent(token)}&page=${page}&limit=${TASKS_PAGE_SIZE}&status=open`,
+      `${apiBaseUrl}/api/projects/${projectId}/tasks?${params.toString()}`,
       { method: 'GET', headers: { 'Content-Type': 'application/json' } }
     )
     if (!tasksResponse.ok) {
@@ -196,7 +230,7 @@ export function ManagerAssignment() {
     return () => {
       cancelled = true
     }
-  }, [user?.project_id, taskPage])
+  }, [user?.project_id, taskPage, typeFilter, dateFrom, dateTo])
 
   const toggleTaskSelection = (taskId: string) => {
     const newSelection = new Set(selectedTasks)
@@ -238,8 +272,9 @@ export function ManagerAssignment() {
       // 获取所有页的任务
       const allTasks: Task[] = []
       for (let page = 1; page <= taskPages; page++) {
+        const params = buildTasksQuery(page, token)
         const response = await fetch(
-          `${apiBaseUrl}/api/projects/${user.project_id}/tasks?token=${encodeURIComponent(token)}&page=${page}&limit=${TASKS_PAGE_SIZE}&status=open`,
+          `${apiBaseUrl}/api/projects/${user.project_id}/tasks?${params.toString()}`,
           { method: 'GET', headers: { 'Content-Type': 'application/json' } }
         )
         if (!response.ok) continue
@@ -319,9 +354,11 @@ export function ManagerAssignment() {
       const result = await response.json()
       console.log('✅ Assignment successful:', result)
 
+      const taskCount = selectedTasks.size
+
       setMessage({
         type: 'success',
-        text: `Successfully assigned ${selectedTasks.size} task(s) to coder`,
+        text: `Successfully assigned ${taskCount} task(s) to coder`,
       })
 
       // Clear selections
@@ -449,7 +486,7 @@ export function ManagerAssignment() {
                       <ChevronDown className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuContent align="end" className="z-[100] w-56 bg-white shadow-lg">
                     <DropdownMenuItem onClick={() => selectByRatio(0.25)}>
                       Select 25% ({Math.ceil(taskTotal * 0.25)} of {taskTotal} tasks)
                     </DropdownMenuItem>
@@ -495,6 +532,60 @@ export function ManagerAssignment() {
             </div>
           </CardHeader>
           <CardContent>
+            <div className="flex flex-wrap gap-3 items-end mb-4">
+              <TaskTypeFilter
+                selected={typeFilter}
+                onChange={(next) => {
+                  setTypeFilter(next)
+                  setTaskPage(1)
+                  setSelectedTasks(new Set())
+                }}
+              />
+
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs text-gray-400">Created from</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value)
+                    setTaskPage(1)
+                    setSelectedTasks(new Set())
+                  }}
+                  className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs text-gray-400">To</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => {
+                    setDateTo(e.target.value)
+                    setTaskPage(1)
+                    setSelectedTasks(new Set())
+                  }}
+                  className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+
+              {hasActiveFilter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeFilter(new Set())
+                    setDateFrom('')
+                    setDateTo('')
+                    setTaskPage(1)
+                    setSelectedTasks(new Set())
+                  }}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline self-end mb-1"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+
             {tasksLoading && tasks.length === 0 ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -502,7 +593,9 @@ export function ManagerAssignment() {
             ) : tasks.length === 0 ? (
               <div className="text-center py-12">
                 <AlertCircle className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500 text-sm">No unassigned tasks available</p>
+                <p className="text-gray-500 text-sm">
+                  {hasActiveFilter ? 'No open tasks match these filters' : 'No unassigned tasks available'}
+                </p>
               </div>
             ) : (
               <div className="relative space-y-2 max-h-[600px] overflow-y-auto">
@@ -530,10 +623,15 @@ export function ManagerAssignment() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{task.title}</p>
-                      <div className="flex items-center gap-2 mt-1">
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
                         <Badge variant="outline" className="text-xs">
                           {task.status}
                         </Badge>
+                        {task.task_type && (
+                          <Badge variant="secondary" className="text-xs capitalize">
+                            {formatTaskType(task.task_type)}
+                          </Badge>
+                        )}
                         {task.created_at && (
                           <span className="text-xs text-gray-500">
                             {new Date(task.created_at).toLocaleDateString()}

@@ -12,6 +12,7 @@ export function CreateProject() {
     name: '',
     slug: '',
     tags: [] as string[],
+    memo: '',
   })
   const navigate = useNavigate()
 
@@ -27,6 +28,7 @@ export function CreateProject() {
       }
 
       const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
+      const memo = formData.memo.trim()
       
       const response = await fetch(`${apiBaseUrl}/api/projects?token=${encodeURIComponent(token)}`, {
         method: 'POST',
@@ -37,6 +39,7 @@ export function CreateProject() {
           name: formData.name,
           slug: formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-'),
           tags: formData.tags.length > 0 ? formData.tags : ['general'],
+          ...(memo ? { memo } : {}),
         }),
       })
 
@@ -185,6 +188,24 @@ export function CreateProject() {
                 />
                 <p className="mt-1 text-xs text-gray-500">
                   Separate multiple tags with commas
+                </p>
+              </div>
+
+              {/* Project memo — shown on Timeline */}
+              <div>
+                <label htmlFor="memo" className="block text-sm font-medium text-gray-700 mb-2">
+                  Project memo
+                </label>
+                <textarea
+                  id="memo"
+                  rows={4}
+                  value={formData.memo}
+                  onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm resize-y"
+                  placeholder="Purpose, research questions, or notes for this project…"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Optional. Appears on the project Timeline when the project is created.
                 </p>
               </div>
 

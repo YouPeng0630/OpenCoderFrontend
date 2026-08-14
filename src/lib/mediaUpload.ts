@@ -7,7 +7,7 @@ import { getToken } from "@/lib/storage";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
-export type MediaType = "image" | "video" | "audio";
+export type MediaType = "image" | "video" | "audio" | "pdf";
 
 export interface MediaUploadItemResult {
   file: File;
@@ -48,7 +48,9 @@ async function initMediaUpload(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         filename: file.name,
-        mime_type: file.type || "application/octet-stream",
+        mime_type:
+          file.type ||
+          (mediaType === "pdf" ? "application/pdf" : "application/octet-stream"),
         file_size: file.size,
         media_type: mediaType,
         origin: window.location.origin,
@@ -243,6 +245,131 @@ export function formatDriveAuthError(message: string): string {
   return message;
 }
 
+export type DetectedFileType = MediaType | "text";
+
+export function detectUploadFileType(file: File): DetectedFileType | null {
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type.startsWith("audio/")) return "audio";
+  if (file.type === "application/pdf" || file.type === "application/x-pdf") return "pdf";
+  if (
+    file.type === "text/plain" ||
+    file.type === "text/markdown" ||
+    file.type.startsWith("text/")
+  ) {
+    return "text";
+  }
+  const name = file.name.toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(name)) return "image";
+  if (/\.(mp4|webm|mov|mkv|avi)$/.test(name)) return "video";
+  if (/\.(mp3|wav|m4a|aac|ogg|flac)$/.test(name)) return "audio";
+  if (name.endsWith(".pdf")) return "pdf";
+  if (/\.(txt|md|text)$/.test(name)) return "text";
+  return null;
+}
+
+export interface TypedUploadItem {
+  file: File;
+  mediaType: DetectedFileType;
+}
+
+export interface UploadTypedFilesOptions {
+  projectId: string;
+  items: TypedUploadItem[];
+  concurrency?: number;
+  onFileProgress?: (file: File, percent: number) => void;
+  onFileComplete?: (result: MediaUploadItemResult & { mediaType: DetectedFileType }) => void;
+}
+
+/**
+ * One file → one task. Types: image | video | audio | pdf | text (.txt via bulk).
+ */
+export async function uploadTypedFilesAsSeparateTasks(
+  options: UploadTypedFilesOptions
+): Promise<Array<MediaUploadItemResult & { mediaType: DetectedFileType }>> {
+  const {
+    projectId,
+    items,
+    concurrency = 3,
+    onFileProgress,
+    onFileComplete,
+  } = options;
+  const token = getToken();
+  if (!token) throw new Error("Not authenticated. Please login again.");
+  if (!items.length) throw new Error("No files selected");
+
+  return mapPool(items, concurrency, async (item) => {
+    const { file, mediaType } = item;
+
+    if (mediaType === "text") {
+      try {
+        const text = (await file.text()).trim();
+        if (!text) {
+          const result = { file, success: false, error: "Empty text file", mediaType } as const;
+          onFileComplete?.(result);
+          return result;
+        }
+        const response = await fetch(
+          `${API_BASE_URL}/api/projects/${projectId}/tasks/bulk?token=${encodeURIComponent(token)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tasks: [
+                {
+                  title: file.name.replace(/\.[^.]+$/, "") || text.slice(0, 100),
+                  task_type: "text",
+                  payload: {
+                    text,
+                    meta: { source: "mixed_drop", original_filename: file.name },
+                  },
+                  tags: [],
+                },
+              ],
+            }),
+          }
+        );
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(apiErrorMessage(errorData.detail, "Failed to create text task"));
+        }
+        const data = await response.json();
+        const created = Array.isArray(data) ? data[0] : data?.tasks?.[0] || data?.[0];
+        const result = {
+          file,
+          success: true,
+          taskId: created?.id || created?._id,
+          mediaType,
+        };
+        onFileComplete?.(result);
+        return result;
+      } catch (err: any) {
+        const result = {
+          file,
+          success: false,
+          error: err?.message || "Text upload failed",
+          mediaType,
+        };
+        onFileComplete?.(result);
+        return result;
+      }
+    }
+
+    // image | video | audio | pdf → Drive resumable + finalize (one task each)
+    const base = await uploadOneMediaFile(
+      projectId,
+      token,
+      mediaType,
+      file,
+      file.name,
+      (percent) => onFileProgress?.(file, percent)
+    );
+    const result = { ...base, mediaType };
+    onFileComplete?.(result);
+    return result;
+  });
+}
+
 export interface MultimodalFileSlot {
   mediaType: MediaType;
   file: File;
@@ -257,8 +384,9 @@ export interface UploadMultimodalOptions {
 }
 
 /**
- * Upload multiple media files (one of each type) into a single multimodal task.
- * Each file: init → Drive PUT → then one finalize-multimodal call.
+ * Upload media/PDF files (at most one of each type) into a single multimodal task.
+ * Each Drive file: init → PUT → then one finalize-multimodal call.
+ * Optional text (typed or from .txt) is sent in the finalize body.
  */
 export async function uploadMultimodalTask(
   options: UploadMultimodalOptions
@@ -266,7 +394,9 @@ export async function uploadMultimodalTask(
   const { projectId, title, slots, text, onSlotProgress } = options;
   const token = getToken();
   if (!token) throw new Error("Not authenticated. Please login again.");
-  if (!slots.length) throw new Error("Select at least one media file");
+  if (!slots.length && !text?.trim()) {
+    throw new Error("Select at least one media/PDF file or provide text");
+  }
 
   const types = slots.map((s) => s.mediaType);
   if (new Set(types).size !== types.length) {

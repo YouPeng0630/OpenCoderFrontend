@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, ReactNode } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { getToken } from '@/lib/storage';
@@ -171,6 +171,20 @@ function getPayloadVideo(task: Task | null): NonNullable<Task['payload']['video'
 }
 
 /** True when payload carries audio fields */
+function getPayloadPdf(task: Task | null): {
+  drive_file_id?: string;
+  drive_file_url?: string;
+  drive_view_url?: string;
+  original_filename?: string;
+  file_size?: number;
+  mime_type?: string;
+} | null {
+  if (!task?.payload) return null;
+  const pdf = (task.payload as any).pdf;
+  if (!pdf || typeof pdf !== 'object') return null;
+  return pdf;
+}
+
 function getPayloadAudio(task: Task | null): NonNullable<Task['payload']['audio']> | null {
   const aud = task?.payload?.audio;
   if (!aud || typeof aud !== 'object') return null;
@@ -185,6 +199,334 @@ function getPayloadAudio(task: Task | null): NonNullable<Task['payload']['audio'
   }
   return null;
 }
+
+/**
+ * Drive preview iframes reload whenever React recreates the <iframe> DOM node.
+ * Mount imperatively and only replace when driveFileId changes.
+ */
+const DriveMediaEmbed = React.memo(function DriveMediaEmbed({
+  driveFileId,
+  title,
+  height,
+  className,
+}: {
+  driveFileId: string
+  title: string
+  height: string
+  className?: string
+}) {
+  const hostRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    host.replaceChildren()
+    const iframe = document.createElement('iframe')
+    iframe.src = `https://drive.google.com/file/d/${driveFileId}/preview`
+    iframe.allow = 'autoplay; fullscreen'
+    iframe.title = title
+    if (className) iframe.className = className
+    iframe.style.height = height
+    iframe.style.border = 'none'
+    iframe.style.width = '100%'
+    host.appendChild(iframe)
+  }, [driveFileId, title, height, className])
+
+  return <div ref={hostRef} className={className} style={{ height }} />
+})
+
+const MemoTranscriptViewer = React.memo(TranscriptViewer)
+
+/** Left-column media + transcript; skipped when only notes/tags state changes. */
+const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
+  task,
+  projectId,
+  userId,
+  tagGroups,
+  onOpenPdfCoding,
+}: {
+  task: Task
+  projectId: string
+  userId: string
+  tagGroups: any[]
+  onOpenPdfCoding: (taskId: string) => void
+}) {
+  const imgPayload = getPayloadImage(task)
+  const videoPayload = getPayloadVideo(task)
+  const audioPayload = getPayloadAudio(task)
+  const pdfPayload = getPayloadPdf(task)
+  const textContent = task.payload?.text
+  const hasMedia = !!(imgPayload || videoPayload || audioPayload || pdfPayload)
+  const showTranscript = !!(videoPayload || audioPayload)
+  const isMulti = task.task_type === 'multimodal'
+
+  return (
+    <div className="space-y-5">
+      {imgPayload && (() => {
+        const fileId = getDriveFileIdForEmbed(imgPayload)
+        const driveHref =
+          imgPayload.drive_view_url ||
+          imgPayload.drive_file_url ||
+          (fileId ? `https://drive.google.com/file/d/${fileId}/view` : '')
+        const srcCandidates = getImageSrcCandidates(imgPayload)
+        const primarySrc = srcCandidates[0] ?? null
+        return (
+          <div className="space-y-3">
+            {isMulti && (
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Image</p>
+            )}
+            <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden flex flex-col items-center justify-center min-h-[200px]">
+              {!primarySrc ? (
+                <p className="text-sm text-gray-500 p-6 text-center">
+                  No image URL in task payload.
+                  {driveHref ? (
+                    <>
+                      {' '}
+                      <a href={driveHref} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                        Open in Google Drive
+                      </a>
+                    </>
+                  ) : null}
+                </p>
+              ) : (
+                <img
+                  src={primarySrc}
+                  alt={task.title}
+                  className="w-full max-h-[min(70vh,640px)] object-contain bg-white"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  data-candidate-idx="0"
+                  onError={(e) => {
+                    const el = e.target as HTMLImageElement
+                    let idx = parseInt(el.getAttribute('data-candidate-idx') || '0', 10)
+                    idx += 1
+                    if (idx < srcCandidates.length) {
+                      el.setAttribute('data-candidate-idx', String(idx))
+                      el.src = srcCandidates[idx]
+                      return
+                    }
+                    el.src =
+                      'data:image/svg+xml,' +
+                      encodeURIComponent(
+                        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect fill="#eee" width="200" height="200"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-size="14" font-family="Arial">Image load error</text></svg>'
+                      )
+                  }}
+                />
+              )}
+            </div>
+            <div className="text-xs text-gray-500 space-y-1 px-1">
+              {imgPayload.original_filename ? <p>📁 {imgPayload.original_filename}</p> : null}
+              {typeof imgPayload.file_size === 'number' ? (
+                <p>📊 {(imgPayload.file_size / 1024).toFixed(1)} KB</p>
+              ) : null}
+              {driveHref ? (
+                <p>
+                  🔗{' '}
+                  <a href={driveHref} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                    View in Google Drive
+                  </a>
+                </p>
+              ) : null}
+            </div>
+          </div>
+        )
+      })()}
+
+      {videoPayload && (
+        <div className="space-y-3">
+          {isMulti && (
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Video</p>
+          )}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
+            {!videoPayload.drive_file_id ? (
+              <p className="text-sm text-gray-500 p-6 text-center">
+                No video available.
+                {(videoPayload.drive_view_url || videoPayload.drive_file_url) ? (
+                  <>
+                    {' '}
+                    <a
+                      href={videoPayload.drive_view_url || videoPayload.drive_file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 underline"
+                    >
+                      Open in Google Drive
+                    </a>
+                  </>
+                ) : null}
+              </p>
+            ) : (
+              <DriveMediaEmbed
+                driveFileId={videoPayload.drive_file_id}
+                title="Video Player"
+                height="min(70vh, 640px)"
+                className="w-full bg-black"
+              />
+            )}
+          </div>
+          <div className="text-xs text-gray-500 space-y-1 px-1">
+            {videoPayload.original_filename ? <p>📁 {videoPayload.original_filename}</p> : null}
+            {typeof videoPayload.file_size === 'number' ? (
+              <p>📊 {(videoPayload.file_size / 1024 / 1024).toFixed(1)} MB</p>
+            ) : null}
+            {(videoPayload.drive_view_url || videoPayload.drive_file_url) ? (
+              <p>
+                🔗{' '}
+                <a
+                  href={videoPayload.drive_view_url || videoPayload.drive_file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-500 hover:underline"
+                >
+                  View in Google Drive
+                </a>
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {audioPayload && (
+        <div className="space-y-3">
+          {isMulti && (
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Audio</p>
+          )}
+          <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-gray-200 rounded-lg overflow-hidden">
+            {!audioPayload.drive_file_id ? (
+              <p className="text-sm text-gray-500 p-6 text-center">
+                No audio available.
+                {(audioPayload.drive_view_url || audioPayload.drive_file_url) ? (
+                  <>
+                    {' '}
+                    <a
+                      href={audioPayload.drive_view_url || audioPayload.drive_file_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 underline"
+                    >
+                      Open in Google Drive
+                    </a>
+                  </>
+                ) : null}
+              </p>
+            ) : (
+              <div className="w-full flex items-center justify-center p-4">
+                <DriveMediaEmbed
+                  driveFileId={audioPayload.drive_file_id}
+                  title="Audio Player"
+                  height="200px"
+                  className="w-full max-w-2xl"
+                />
+              </div>
+            )}
+          </div>
+          <div className="text-xs text-gray-500 space-y-1 px-1">
+            {audioPayload.original_filename ? <p>📁 {audioPayload.original_filename}</p> : null}
+            {typeof audioPayload.file_size === 'number' ? (
+              <p>📊 {(audioPayload.file_size / 1024).toFixed(1)} KB</p>
+            ) : null}
+            {(audioPayload.drive_view_url || audioPayload.drive_file_url) ? (
+              <p>
+                🔗{' '}
+                <a
+                  href={audioPayload.drive_view_url || audioPayload.drive_file_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-500 hover:underline"
+                >
+                  View in Google Drive
+                </a>
+              </p>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {pdfPayload && (
+        <div className="space-y-3">
+          {isMulti && (
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">PDF</p>
+          )}
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">
+                {pdfPayload.original_filename || 'PDF document'}
+              </p>
+              {typeof pdfPayload.file_size === 'number' ? (
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {(pdfPayload.file_size / 1024 / 1024).toFixed(1)} MB
+                </p>
+              ) : null}
+              {(pdfPayload.drive_view_url ||
+                pdfPayload.drive_file_url ||
+                pdfPayload.drive_file_id) ? (
+                <a
+                  href={
+                    pdfPayload.drive_view_url ||
+                    pdfPayload.drive_file_url ||
+                    `https://drive.google.com/file/d/${pdfPayload.drive_file_id}/view`
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Open in Google Drive
+                </a>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => onOpenPdfCoding(task.id)}
+              className="shrink-0"
+            >
+              <FileText className="h-4 w-4 mr-1.5" />
+              Open PDF Coding
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {textContent ? (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          {isMulti && hasMedia && (
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Text</p>
+          )}
+          <p className="text-base text-gray-900 whitespace-pre-wrap leading-relaxed">{textContent}</p>
+        </div>
+      ) : null}
+
+      {!hasMedia && !textContent && (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <p className="text-sm text-gray-500">No media or text on this task.</p>
+        </div>
+      )}
+
+      {showTranscript && projectId && task.id && (
+        <MemoTranscriptViewer
+          projectId={projectId}
+          taskId={task.id}
+          tagGroups={tagGroups}
+          userId={userId}
+        />
+      )}
+    </div>
+  )
+}, (prev, next) => {
+  if (prev.task.id !== next.task.id) return false
+  if (prev.projectId !== next.projectId || prev.userId !== next.userId) return false
+  if (prev.tagGroups !== next.tagGroups) return false
+  const a = prev.task.payload || {}
+  const b = next.task.payload || {}
+  return (
+    a.video?.drive_file_id === b.video?.drive_file_id &&
+    a.audio?.drive_file_id === b.audio?.drive_file_id &&
+    a.image?.drive_file_id === b.image?.drive_file_id &&
+    a.pdf?.drive_file_id === b.pdf?.drive_file_id &&
+    a.text === b.text &&
+    prev.task.task_type === next.task.task_type
+  )
+})
 
 /**
  * Check if task is bibliographic
@@ -974,68 +1316,63 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
     }
   };
 
-  const ContentWrapper: React.FC<{ children: ReactNode }> = ({ children }) => {
-    return noLayout ? <>{children}</> : <PageLayout>{children}</PageLayout>;
-  };
+  // Never define a component inside Coder — a new type each render remounts
+  // the whole tree (Drive iframe + transcript reload on every keystroke).
+  const wrap = (node: ReactNode) =>
+    noLayout ? <>{node}</> : <PageLayout>{node}</PageLayout>;
 
   if (loading) {
-    return (
-      <ContentWrapper>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
-            <p className="text-gray-500">Loading annotation interface...</p>
-          </div>
+    return wrap(
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+          <p className="text-gray-500">Loading annotation interface...</p>
         </div>
-      </ContentWrapper>
+      </div>
     );
   }
 
   // 显示任务类型选择器
   if (showTaskTypeSelector) {
     console.log('🎨 Rendering TaskTypeSelector with stats:', taskTypeStats);
-    return (
-      <ContentWrapper>
-        <div className="max-w-6xl mx-auto space-y-6 py-8">
-          <TaskTypeSelector
-            stats={taskTypeStats}
-            onSelectType={handleSelectTaskType}
-            loading={loadingStats}
-          />
-        </div>
-      </ContentWrapper>
+    return wrap(
+      <div className="max-w-6xl mx-auto space-y-6 py-8">
+        <TaskTypeSelector
+          stats={taskTypeStats}
+          onSelectType={handleSelectTaskType}
+          loading={loadingStats}
+        />
+      </div>
     );
   }
 
   // 没有任务时的显示
   if (!loading && !currentTask) {
     console.log('🎨 Rendering "All Tasks Completed" screen');
-    return (
-      <ContentWrapper>
-        <div className="max-w-2xl mx-auto text-center space-y-6 py-12">
-          <div className="bg-gradient-to-br from-green-50 to-blue-50 border border-green-200 rounded-lg p-8">
-            <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">All Tasks Completed!</h2>
-            <p className="text-gray-600 mb-6">
-              {selectedTaskType 
-                ? `You've finished all ${selectedTaskType} tasks.`
-                : "Great work! You've completed all your assigned tasks."}
-            </p>
-            {selectedTaskType && (
-              <Button onClick={handleBackToTypeSelector} variant="outline" className="gap-2">
-                <ArrowLeft className="h-4 w-4" />
-                Back to Task Types
-              </Button>
-            )}
-          </div>
-          <MessageManagerDialog />
+    return wrap(
+      <div className="max-w-2xl mx-auto text-center space-y-6 py-12">
+        <div className="bg-gradient-to-br from-green-50 to-blue-50 border border-green-200 rounded-lg p-8">
+          <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">All Tasks Completed!</h2>
+          <p className="text-gray-600 mb-6">
+            {selectedTaskType 
+              ? `You've finished all ${selectedTaskType} tasks.`
+              : "Great work! You've completed all your assigned tasks."}
+          </p>
+          {selectedTaskType && (
+            <Button onClick={handleBackToTypeSelector} variant="outline" className="gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back to Task Types
+            </Button>
+          )}
         </div>
-      </ContentWrapper>
+        <MessageManagerDialog />
+      </div>
     );
   }
 
-  return (
-    <ContentWrapper>
+  return wrap(
+    <>
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Page Header with Message Button and Back Button */}
         <div className="flex items-center justify-between">
@@ -1321,234 +1658,13 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
             </div>
           </CardHeader>
           <CardContent>
-            {(() => {
-              console.log('🎯 Current task:', currentTask);
-              console.log('🎯 Task type:', currentTask?.task_type);
-              console.log('🎯 Payload:', currentTask?.payload);
-              console.log('🎯 Payload.audio:', currentTask?.payload?.audio);
-              console.log('🎯 Payload keys:', Object.keys(currentTask?.payload || {}));
-              console.log('🎯 getPayloadImage:', getPayloadImage(currentTask));
-              console.log('🎯 getPayloadVideo:', getPayloadVideo(currentTask));
-              console.log('🎯 getPayloadAudio:', getPayloadAudio(currentTask));
-              return null;
-            })()}
-            {/* Stack media blocks (supports multimodal: image + video + audio + text) */}
-            {(() => {
-              const imgPayload = getPayloadImage(currentTask);
-              const videoPayload = getPayloadVideo(currentTask);
-              const audioPayload = getPayloadAudio(currentTask);
-              const textContent = currentTask.payload.text;
-              const hasMedia = !!(imgPayload || videoPayload || audioPayload);
-              const showTranscript = !!(videoPayload || audioPayload);
-
-              return (
-                <div className="space-y-5">
-                  {imgPayload && (() => {
-                    const fileId = getDriveFileIdForEmbed(imgPayload);
-                    const driveHref =
-                      imgPayload.drive_view_url ||
-                      imgPayload.drive_file_url ||
-                      (fileId ? `https://drive.google.com/file/d/${fileId}/view` : '');
-                    const srcCandidates = getImageSrcCandidates(imgPayload);
-                    const primarySrc = srcCandidates[0] ?? null;
-                    return (
-                      <div className="space-y-3">
-                        {currentTask.task_type === 'multimodal' && (
-                          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Image</p>
-                        )}
-                        <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden flex flex-col items-center justify-center min-h-[200px]">
-                          {!primarySrc ? (
-                            <p className="text-sm text-gray-500 p-6 text-center">
-                              No image URL in task payload.
-                              {driveHref ? (
-                                <>
-                                  {' '}
-                                  <a href={driveHref} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                                    Open in Google Drive
-                                  </a>
-                                </>
-                              ) : null}
-                            </p>
-                          ) : (
-                            <img
-                              src={primarySrc}
-                              alt={currentTask.title}
-                              className="w-full max-h-[min(70vh,640px)] object-contain bg-white"
-                              loading="lazy"
-                              referrerPolicy="no-referrer"
-                              data-candidate-idx="0"
-                              onError={(e) => {
-                                const el = e.target as HTMLImageElement;
-                                let idx = parseInt(el.getAttribute('data-candidate-idx') || '0', 10);
-                                idx += 1;
-                                if (idx < srcCandidates.length) {
-                                  el.setAttribute('data-candidate-idx', String(idx));
-                                  el.src = srcCandidates[idx];
-                                  return;
-                                }
-                                el.src =
-                                  'data:image/svg+xml,' +
-                                  encodeURIComponent(
-                                    '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect fill="#eee" width="200" height="200"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-size="14" font-family="Arial">Image load error</text></svg>'
-                                  );
-                              }}
-                            />
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-500 space-y-1 px-1">
-                          {imgPayload.original_filename ? <p>📁 {imgPayload.original_filename}</p> : null}
-                          {typeof imgPayload.file_size === 'number' ? (
-                            <p>📊 {(imgPayload.file_size / 1024).toFixed(1)} KB</p>
-                          ) : null}
-                          {driveHref ? (
-                            <p>
-                              🔗{' '}
-                              <a href={driveHref} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                                View in Google Drive
-                              </a>
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {videoPayload && (() => {
-                    const driveFileId = videoPayload.drive_file_id;
-                    const driveHref = videoPayload.drive_view_url || videoPayload.drive_file_url;
-                    const embedUrl = driveFileId
-                      ? `https://drive.google.com/file/d/${driveFileId}/preview`
-                      : null;
-                    return (
-                      <div className="space-y-3">
-                        {currentTask.task_type === 'multimodal' && (
-                          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Video</p>
-                        )}
-                        <div className="bg-gray-50 border border-gray-200 rounded-lg overflow-hidden">
-                          {!embedUrl ? (
-                            <p className="text-sm text-gray-500 p-6 text-center">
-                              No video available.
-                              {driveHref ? (
-                                <>
-                                  {' '}
-                                  <a href={driveHref} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                                    Open in Google Drive
-                                  </a>
-                                </>
-                              ) : null}
-                            </p>
-                          ) : (
-                            <iframe
-                              key={driveFileId}
-                              src={embedUrl}
-                              className="w-full bg-black"
-                              style={{ height: 'min(70vh, 640px)', border: 'none' }}
-                              allow="autoplay; fullscreen"
-                              title="Video Player"
-                            />
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-500 space-y-1 px-1">
-                          {videoPayload.original_filename ? <p>📁 {videoPayload.original_filename}</p> : null}
-                          {typeof videoPayload.file_size === 'number' ? (
-                            <p>📊 {(videoPayload.file_size / 1024 / 1024).toFixed(1)} MB</p>
-                          ) : null}
-                          {driveHref ? (
-                            <p>
-                              🔗{' '}
-                              <a href={driveHref} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                                View in Google Drive
-                              </a>
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {audioPayload && (() => {
-                    const driveFileId = audioPayload.drive_file_id;
-                    const driveHref = audioPayload.drive_view_url || audioPayload.drive_file_url;
-                    const embedUrl = driveFileId
-                      ? `https://drive.google.com/file/d/${driveFileId}/preview`
-                      : null;
-                    return (
-                      <div className="space-y-3">
-                        {currentTask.task_type === 'multimodal' && (
-                          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Audio</p>
-                        )}
-                        <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-gray-200 rounded-lg overflow-hidden">
-                          {!embedUrl ? (
-                            <p className="text-sm text-gray-500 p-6 text-center">
-                              No audio available.
-                              {driveHref ? (
-                                <>
-                                  {' '}
-                                  <a href={driveHref} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                                    Open in Google Drive
-                                  </a>
-                                </>
-                              ) : null}
-                            </p>
-                          ) : (
-                            <div className="w-full flex items-center justify-center p-4">
-                              <iframe
-                                key={driveFileId}
-                                src={embedUrl}
-                                className="w-full max-w-2xl"
-                                style={{ height: '200px', border: 'none' }}
-                                allow="autoplay"
-                                title="Audio Player"
-                              />
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-500 space-y-1 px-1">
-                          {audioPayload.original_filename ? <p>📁 {audioPayload.original_filename}</p> : null}
-                          {typeof audioPayload.file_size === 'number' ? (
-                            <p>📊 {(audioPayload.file_size / 1024).toFixed(1)} KB</p>
-                          ) : null}
-                          {driveHref ? (
-                            <p>
-                              🔗{' '}
-                              <a href={driveHref} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                                View in Google Drive
-                              </a>
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {textContent ? (
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                      {currentTask.task_type === 'multimodal' && hasMedia && (
-                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Text</p>
-                      )}
-                      <p className="text-base text-gray-900 whitespace-pre-wrap leading-relaxed">
-                        {textContent}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {!hasMedia && !textContent && (
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                      <p className="text-sm text-gray-500">No media or text on this task.</p>
-                    </div>
-                  )}
-
-                  {showTranscript && user?.project_id && currentTask.id && (
-                    <TranscriptViewer
-                      projectId={user.project_id}
-                      taskId={currentTask.id}
-                      tagGroups={tagGroups}
-                      userId={user.id || ''}
-                    />
-                  )}
-                </div>
-              );
-            })()}
+            <CoderTaskMediaPanel
+              task={currentTask}
+              projectId={user?.project_id || ''}
+              userId={user?.id || ''}
+              tagGroups={tagGroups}
+              onOpenPdfCoding={(taskId) => navigate(`/pdf-coding/${taskId}`)}
+            />
           </CardContent>
         </Card>
 
@@ -1794,6 +1910,6 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       {user?.id && user?.project_id && (
         <ChatButton projectId={user.project_id} userId={user.id} />
       )}
-    </ContentWrapper>
+    </>
   );
 };
