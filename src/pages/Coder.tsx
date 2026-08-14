@@ -567,6 +567,54 @@ function getBibliographicMetadata(task: Task | null): any | null {
   return null;
 }
 
+/** Best-effort text for AI coding suggestions (selected / task content). */
+function getTaskContentForAI(task: Task | null): string {
+  if (!task) return '';
+  const parts: string[] = [];
+  const text = (task.payload?.text || '').trim();
+  if (text) parts.push(text);
+
+  const bib = getBibliographicMetadata(task);
+  if (bib && typeof bib === 'object') {
+    const title = String(bib.title || bib.Title || '').trim();
+    const abstract = String(bib.abstract || bib.Abstract || '').trim();
+    const authors = Array.isArray(bib.authors)
+      ? bib.authors.join(', ')
+      : String(bib.author || bib.Author || '');
+    if (title) parts.push(`Title: ${title}`);
+    if (authors) parts.push(`Authors: ${authors}`);
+    if (abstract && abstract !== text) parts.push(`Abstract: ${abstract}`);
+  }
+
+  const img = getPayloadImage(task);
+  if (img?.original_filename) parts.push(`Image file: ${img.original_filename}`);
+  const vid = getPayloadVideo(task);
+  if (vid && (vid as any).original_filename) {
+    parts.push(`Video file: ${(vid as any).original_filename}`);
+  }
+  const aud = getPayloadAudio(task);
+  if (aud && (aud as any).original_filename) {
+    parts.push(`Audio file: ${(aud as any).original_filename}`);
+  }
+  const pdf = getPayloadPdf(task);
+  if (pdf?.original_filename) parts.push(`PDF file: ${pdf.original_filename}`);
+
+  if (task.title?.trim()) {
+    const t = task.title.trim();
+    if (!parts.some((p) => p.includes(t))) parts.unshift(`Task: ${t}`);
+  }
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of parts) {
+    if (!seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  }
+  return out.join('\n\n').trim();
+}
+
 /**
  * URLs to try for <img src>. Order matters:
  * - uc?export=view often returns HTML (virus scan / consent), so it fails as image — put it late.
@@ -1025,6 +1073,19 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       return;
     }
 
+    const content = getTaskContentForAI(currentTask);
+    if (!content) {
+      setMessage({
+        type: 'error',
+        text: 'No text content to send. AI suggestion needs selected text (or task text / abstract).',
+      });
+      return;
+    }
+    if (tagGroups.length === 0) {
+      setMessage({ type: 'error', text: 'No tag groups configured for this project.' });
+      return;
+    }
+
     try {
       setLoadingAISuggestion(true);
       setMessage(null);
@@ -1033,18 +1094,24 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       const token = getToken();
       if (!token) throw new Error('No authentication token');
 
-      console.log('🤖 Getting AI suggestion...');
+      console.log('🤖 Getting AI suggestion for content length:', content.length);
 
-      // 准备tag_groups数据
-      const tagGroupsForAI = tagGroups.map(group => ({
-        group_id: group.group_id,
-        group_name: group.name,
-        type: group.type,
-        options: group.options.map(opt => ({
-          value: (opt as any).option_id || opt.value || opt.label,
-          label: opt.label
-        }))
-      }));
+      // Full codebook: groups + tags + descriptions (left=group, right=option)
+      const tagGroupsForAI = tagGroups
+        .filter((g) => g.active !== false)
+        .map((group) => ({
+          group_id: group.group_id,
+          group_name: group.name,
+          description: group.description || '',
+          type: group.type,
+          options: group.options
+            .filter((o) => (o as any).active !== false)
+            .map((opt) => ({
+              value: (opt as any).option_id || opt.value || opt.label,
+              label: opt.label,
+              description: opt.description || '',
+            })),
+        }));
 
       const response = await fetch(
         `${apiBaseUrl}/api/llm/annotate?token=${encodeURIComponent(token)}`,
@@ -1052,50 +1119,55 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sentence: currentTask.payload.text,
-            tag_groups: tagGroupsForAI
+            sentence: content,
+            tag_groups: tagGroupsForAI,
+            project_id: user.project_id,
           }),
         }
       );
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-        throw new Error(errorData?.detail || `Failed: ${response.status}`);
+        const detail = errorData?.detail;
+        throw new Error(
+          typeof detail === 'string'
+            ? detail
+            : Array.isArray(detail)
+            ? detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ')
+            : `Failed: ${response.status}`
+        );
       }
 
       const result = await response.json();
       console.log('✅ AI suggestion received:', result);
 
       if (result.success) {
-        // Auto-fill AI suggested labels
-        // Convert group_id from API response to _id used in frontend state
         const suggestions: { [groupId: string]: string[] } = {};
         result.annotation.labels.forEach((label: any) => {
-          // Find the tag group by group_id and use its _id
-          const tagGroup = tagGroups.find(g => g.group_id === label.group_id);
-          if (tagGroup) {
+          const tagGroup = tagGroups.find((g) => g.group_id === label.group_id);
+          if (tagGroup && Array.isArray(label.selected) && label.selected.length > 0) {
             suggestions[tagGroup._id] = label.selected;
-          } else {
+          } else if (!tagGroup) {
             console.warn(`⚠️ Tag group not found for group_id: ${label.group_id}`);
           }
         });
 
-        setSelectedTags(suggestions);
+        setSelectedTags((prev) => ({ ...prev, ...suggestions }));
         setAiSuggestion({
           confidence: result.annotation.overall_confidence,
-          reasoning: result.annotation.reasoning
+          reasoning: result.annotation.reasoning,
         });
 
         setMessage({
           type: 'success',
-          text: `AI suggestions applied (confidence: ${(result.annotation.overall_confidence * 100).toFixed(0)}%)`
+          text: `AI suggestions applied (confidence: ${(result.annotation.overall_confidence * 100).toFixed(0)}%)`,
         });
       }
     } catch (error) {
       console.error('❌ Failed to get AI suggestion:', error);
       setMessage({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Failed to get AI suggestion'
+        text: error instanceof Error ? error.message : 'Failed to get AI suggestion',
       });
     } finally {
       setLoadingAISuggestion(false);

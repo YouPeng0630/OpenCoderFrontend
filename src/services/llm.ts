@@ -120,14 +120,48 @@ export interface AnnotationResponse {
 export interface TagGroup {
   group_id: string;
   group_name: string;
+  description?: string;
   type: 'single' | 'multi';
   options: Array<{
     value: string;
     label: string;
+    description?: string;
   }>;
 }
 
-// ============== API Functions ==============
+/**
+ * AI标注建议 — content + full codebook (+ project_id for memo).
+ */
+export async function getAnnotationSuggestion(
+  sentence: string,
+  tagGroups: TagGroup[],
+  token: string,
+  opts?: { projectId?: string; projectMemo?: string; model?: string }
+): Promise<AnnotationResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/llm/annotate?token=${encodeURIComponent(token)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        sentence,
+        tag_groups: tagGroups,
+        project_id: opts?.projectId,
+        project_memo: opts?.projectMemo,
+        model: opts?.model,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || 'Failed to get annotation suggestion');
+  }
+
+  return response.json();
+}
 
 /**
  * 生成周报
@@ -188,36 +222,6 @@ export async function generateMonthlyReport(
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
     throw new Error(error.detail || 'Failed to generate monthly report');
-  }
-
-  return response.json();
-}
-
-/**
- * AI标注建议
- */
-export async function getAnnotationSuggestion(
-  sentence: string,
-  tagGroups: TagGroup[],
-  token: string
-): Promise<AnnotationResponse> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/llm/annotate?token=${encodeURIComponent(token)}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sentence,
-        tag_groups: tagGroups,
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail || 'Failed to get annotation suggestion');
   }
 
   return response.json();
