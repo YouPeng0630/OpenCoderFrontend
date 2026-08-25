@@ -322,9 +322,17 @@ interface TranscriptViewerProps {
   taskId: string;
   tagGroups: TagGroup[];
   userId: string;
+  /** Notifies parent when a coding selection text changes (for AI suggest). */
+  onTextSelect?: (text: string | null) => void;
 }
 
-export function TranscriptViewer({ projectId, taskId, tagGroups, userId }: TranscriptViewerProps) {
+export function TranscriptViewer({
+  projectId,
+  taskId,
+  tagGroups,
+  userId,
+  onTextSelect,
+}: TranscriptViewerProps) {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [codings, setCodings] = useState<TranscriptCoding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -363,6 +371,10 @@ export function TranscriptViewer({ projectId, taskId, tagGroups, userId }: Trans
   }, [projectId, taskId]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    onTextSelect?.(selection?.textSnapshot?.trim() || null);
+  }, [selection, onTextSelect]);
 
   // Finalize segment drag on mouseup anywhere
   useEffect(() => {

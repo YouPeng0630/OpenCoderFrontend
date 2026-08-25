@@ -12,10 +12,10 @@ import { ManagerTags } from '@/pages/manager/Tags';
 import { ManagerApplicants } from '@/pages/manager/Applicants';
 import { ManagerTasks } from '@/pages/manager/Tasks';
 import { ManagerAssignment } from '@/pages/manager/Assignment';
-import { ManagerDatabase } from '@/pages/manager/Database';
 import { ManagerChat } from '@/pages/manager/Chat';
 import { ManagerActivityLogs } from '@/pages/manager/ActivityLogs';
 import { ManagerNotes } from '@/pages/manager/ManagerNotes';
+import { ManagerSettings } from '@/pages/manager/Settings';
 import { ConsensusResolution } from '@/pages/manager/ConsensusResolution';
 import { Coder } from '@/pages/Coder';
 import { CoderLayout } from '@/pages/coder/CoderLayout';
@@ -87,7 +87,8 @@ function App() {
             <Route path="tasks" element={<ManagerTasks />} />
             <Route path="assignment" element={<ManagerAssignment />} />
             <Route path="chat" element={<ManagerChat />} />
-            <Route path="database" element={<ManagerDatabase />} />
+            <Route path="settings" element={<ManagerSettings />} />
+            <Route path="database" element={<Navigate to="/project-manager/settings" replace />} />
             <Route path="activity" element={<ManagerActivityLogs />} />
             <Route path="notes" element={<ManagerNotes />} />
             <Route path="consensus/:taskId" element={<ConsensusResolution />} />

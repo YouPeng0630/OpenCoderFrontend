@@ -26,6 +26,8 @@ import { ChatButton } from '@/components/chat/ChatButton';
 import { TaskTypeSelector, getTaskTypeConfig } from '@/components/tasks/TaskTypeSelector';
 import { BibliographicTaskDisplay } from '@/components/tasks/BibliographicTaskDisplay';
 import { TranscriptViewer } from '@/components/transcription/TranscriptViewer';
+import { getAnnotationSuggestion } from '@/services/llm';
+import { getActiveTranscript } from '@/lib/transcription';
 
 interface Task {
   id: string;
@@ -100,10 +102,12 @@ interface Task {
 }
 
 interface TagOption {
-  value: string;
+  value?: string;
+  option_id?: string;
   label: string;
   color?: string;
   description?: string;
+  active?: boolean;
 }
 
 interface TagGroup {
@@ -244,12 +248,14 @@ const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
   userId,
   tagGroups,
   onOpenPdfCoding,
+  onTextSelect,
 }: {
   task: Task
   projectId: string
   userId: string
   tagGroups: any[]
   onOpenPdfCoding: (taskId: string) => void
+  onTextSelect?: (text: string | null) => void
 }) {
   const imgPayload = getPayloadImage(task)
   const videoPayload = getPayloadVideo(task)
@@ -508,6 +514,7 @@ const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
           taskId={task.id}
           tagGroups={tagGroups}
           userId={userId}
+          onTextSelect={onTextSelect}
         />
       )}
     </div>
@@ -516,6 +523,7 @@ const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
   if (prev.task.id !== next.task.id) return false
   if (prev.projectId !== next.projectId || prev.userId !== next.userId) return false
   if (prev.tagGroups !== next.tagGroups) return false
+  if (prev.onTextSelect !== next.onTextSelect) return false
   const a = prev.task.payload || {}
   const b = next.task.payload || {}
   return (
@@ -677,6 +685,11 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
   const memoDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [loadingAISuggestion, setLoadingAISuggestion] = useState(false);
+  /** Text selected in transcript / content panel for AI suggest */
+  const [aiSelectedText, setAiSelectedText] = useState<string | null>(null);
+  const [projectMemo, setProjectMemo] = useState('');
+  /** When false, hide Get AI Suggestion (project Settings). Default true until loaded. */
+  const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true);
   const [aiSuggestion, setAiSuggestion] = useState<{
     confidence: number;
     reasoning: string;
@@ -950,6 +963,8 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
         setCurrentTask(transformedTask);
         setSelectedTags({});  // Reset tags for new task
         setMemoContent('');
+        setAiSelectedText(null);
+        setAiSuggestion(null);
         if (user?.project_id) loadMemo(transformedTask.id, user.project_id);
         console.log('✅ Current task loaded:', transformedTask.id, 'type:', transformedTask.task_type);
       } else {
@@ -1030,6 +1045,35 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.project_id]); // Only re-run when project_id changes
 
+  // Whether managers enabled AI for this project (hide Get AI Suggestion when off)
+  useEffect(() => {
+    if (!user?.project_id) {
+      setAiFeaturesEnabled(true);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getToken();
+        const res = await fetch(
+          `${apiBaseUrl}/api/projects/${user.project_id}/ai-status?token=${encodeURIComponent(token || '')}`
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          const on = data.llm_enabled !== false;
+          setAiFeaturesEnabled(on);
+          if (!on) setAiSuggestion(null);
+        }
+      } catch {
+        /* keep default enabled if status endpoint unavailable */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.project_id, apiBaseUrl]);
+
   const handleTagChange = (groupId: string, optionValue: string, groupType: 'single' | 'multi') => {
     console.log('🏷️ Tag changed:', { groupId, optionValue, groupType });
     
@@ -1068,21 +1112,62 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
   };
 
   const handleGetAISuggestion = async () => {
+    if (!aiFeaturesEnabled) {
+      setMessage({ type: 'error', text: 'AI features are disabled for this project.' });
+      return;
+    }
     if (!currentTask || !user?.project_id) {
       setMessage({ type: 'error', text: 'No task available' });
       return;
     }
 
-    const content = getTaskContentForAI(currentTask);
+    if (tagGroups.length === 0) {
+      setMessage({ type: 'error', text: 'No tag groups configured for this project.' });
+      return;
+    }
+
+    // Prefer: (1) transcript/content selection (2) DOM selection (3) full task text / transcript
+    let content = (aiSelectedText || '').trim();
+    let contentSource = content ? 'selection' : '';
+
+    if (!content) {
+      const domSel = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() : '';
+      if (domSel && domSel.length > 0) {
+        content = domSel;
+        contentSource = 'selection';
+      }
+    }
+
+    if (!content) {
+      // Try active transcript text for audio/video
+      try {
+        const tr = await getActiveTranscript(user.project_id, currentTask.id);
+        const summary = (tr.summary || '').trim();
+        const full =
+          (tr.text || '').trim() ||
+          (tr.segments || []).map((s) => s.text).join(' ').trim();
+        if (summary) {
+          content = summary;
+          contentSource = 'transcript summary';
+        } else if (full) {
+          content = full.slice(0, 12000);
+          contentSource = 'transcript';
+        }
+      } catch {
+        /* no transcript */
+      }
+    }
+
+    if (!content) {
+      content = getTaskContentForAI(currentTask);
+      contentSource = 'task content';
+    }
+
     if (!content) {
       setMessage({
         type: 'error',
-        text: 'No text content to send. AI suggestion needs selected text (or task text / abstract).',
+        text: 'No text to send. Select transcript segments/words or text in the task, then try again.',
       });
-      return;
-    }
-    if (tagGroups.length === 0) {
-      setMessage({ type: 'error', text: 'No tag groups configured for this project.' });
       return;
     }
 
@@ -1094,17 +1179,32 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       const token = getToken();
       if (!token) throw new Error('No authentication token');
 
-      console.log('🤖 Getting AI suggestion for content length:', content.length);
+      // Load project memo if we don't have it yet
+      let memo = projectMemo;
+      if (!memo && user.project_id) {
+        try {
+          const res = await fetch(
+            `${apiBaseUrl}/api/projects/${user.project_id}?token=${encodeURIComponent(token)}`
+          );
+          if (res.ok) {
+            const proj = await res.json();
+            memo = String(proj.memo || proj.description || '').trim();
+            if (memo) setProjectMemo(memo);
+          }
+        } catch {
+          /* optional */
+        }
+      }
 
-      // Full codebook: groups + tags + descriptions (left=group, right=option)
+      // Full codebook: every group + tags + descriptions
       const tagGroupsForAI = tagGroups
         .filter((g) => g.active !== false)
         .map((group) => ({
-          group_id: group.group_id,
+          group_id: group.group_id || group._id,
           group_name: group.name,
           description: group.description || '',
           type: group.type,
-          options: group.options
+          options: (group.options || [])
             .filter((o) => (o as any).active !== false)
             .map((opt) => ({
               value: (opt as any).option_id || opt.value || opt.label,
@@ -1113,54 +1213,70 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
             })),
         }));
 
-      const response = await fetch(
-        `${apiBaseUrl}/api/llm/annotate?token=${encodeURIComponent(token)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sentence: content,
-            tag_groups: tagGroupsForAI,
-            project_id: user.project_id,
-          }),
-        }
-      );
+      console.log('🤖 AI suggest', {
+        source: contentSource,
+        contentLen: content.length,
+        groups: tagGroupsForAI.length,
+        hasMemo: !!memo,
+      });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-        const detail = errorData?.detail;
-        throw new Error(
-          typeof detail === 'string'
-            ? detail
-            : Array.isArray(detail)
-            ? detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ')
-            : `Failed: ${response.status}`
-        );
+      const result = await getAnnotationSuggestion(content, tagGroupsForAI, token, {
+        projectId: user.project_id,
+        projectMemo: memo || undefined,
+        // Model comes from project Settings (annotation_model); omit client hardcode
+      });
+
+      if (!result?.success || !result.annotation) {
+        throw new Error('AI returned an empty response');
       }
 
-      const result = await response.json();
-      console.log('✅ AI suggestion received:', result);
+      const suggestions: { [groupId: string]: string[] } = {};
+      let appliedCount = 0;
 
-      if (result.success) {
-        const suggestions: { [groupId: string]: string[] } = {};
-        result.annotation.labels.forEach((label: any) => {
-          const tagGroup = tagGroups.find((g) => g.group_id === label.group_id);
-          if (tagGroup && Array.isArray(label.selected) && label.selected.length > 0) {
-            suggestions[tagGroup._id] = label.selected;
-          } else if (!tagGroup) {
-            console.warn(`⚠️ Tag group not found for group_id: ${label.group_id}`);
+      for (const label of result.annotation.labels || []) {
+        const tagGroup = tagGroups.find(
+          (g) =>
+            g.group_id === label.group_id ||
+            g._id === label.group_id ||
+            g.name === label.group_name
+        );
+        if (!tagGroup || !Array.isArray(label.selected) || label.selected.length === 0) continue;
+
+        // Map returned values onto option_id/value used by the UI
+        const mapped: string[] = [];
+        for (const sel of label.selected) {
+          const key = String(sel).trim().toLowerCase();
+          const opt = tagGroup.options.find((o) => {
+            const id = String((o as any).option_id || o.value || o.label || '').toLowerCase();
+            const lab = String(o.label || '').toLowerCase();
+            return id === key || lab === key;
+          });
+          if (opt) {
+            mapped.push((opt as any).option_id || opt.value || opt.label);
           }
-        });
+        }
+        if (mapped.length === 0) continue;
+        suggestions[tagGroup._id] = mapped;
+        appliedCount += mapped.length;
+      }
 
-        setSelectedTags((prev) => ({ ...prev, ...suggestions }));
-        setAiSuggestion({
-          confidence: result.annotation.overall_confidence,
-          reasoning: result.annotation.reasoning,
-        });
+      setSelectedTags((prev) => ({ ...prev, ...suggestions }));
+      setAiSuggestion({
+        confidence: result.annotation.overall_confidence ?? 0,
+        reasoning: result.annotation.reasoning || '',
+      });
 
+      if (appliedCount === 0) {
+        setMessage({
+          type: 'error',
+          text:
+            result.annotation.reasoning ||
+            'AI responded but no matching tags were applied. Check codebook option values.',
+        });
+      } else {
         setMessage({
           type: 'success',
-          text: `AI suggestions applied (confidence: ${(result.annotation.overall_confidence * 100).toFixed(0)}%)`,
+          text: `AI applied ${appliedCount} tag(s) from ${contentSource} (confidence: ${((result.annotation.overall_confidence || 0) * 100).toFixed(0)}%)`,
         });
       }
     } catch (error) {
@@ -1173,6 +1289,10 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
       setLoadingAISuggestion(false);
     }
   };
+
+  const handleAiTextSelect = useCallback((text: string | null) => {
+    setAiSelectedText(text);
+  }, []);
 
   // ── Notes (reflexive memos) ──────────────────────────────────────────────
 
@@ -1546,29 +1666,40 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                         Select appropriate tags for this task. Fields marked with * are required.
                       </CardDescription>
                     </div>
-                    <Button
-                      variant="outline"
-                      onClick={handleGetAISuggestion}
-                      disabled={loadingAISuggestion}
-                      className="flex items-center gap-2"
-                    >
-                    {loadingAISuggestion ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4" />
-                        Get AI Suggestion
-                      </>
-                    )}
-                    </Button>
+                    <div className="flex flex-col items-end gap-1">
+                      {aiFeaturesEnabled && (
+                        <>
+                          <Button
+                            variant="outline"
+                            onClick={handleGetAISuggestion}
+                            disabled={loadingAISuggestion}
+                            className="flex items-center gap-2"
+                          >
+                          {loadingAISuggestion ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Generating...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-4 w-4" />
+                              Get AI Suggestion
+                            </>
+                          )}
+                          </Button>
+                          <p className="text-[11px] text-gray-400 max-w-[220px] text-right">
+                            {aiSelectedText?.trim()
+                              ? `Using selection (${aiSelectedText.trim().length} chars)`
+                              : 'Select transcript/text first, or uses full task text'}
+                          </p>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {/* AI Suggestion Display */}
-                  {aiSuggestion && (
+                  {aiFeaturesEnabled && aiSuggestion && (
                     <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200">
                       <div className="flex items-start gap-3">
                         <Sparkles className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -1736,6 +1867,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
               userId={user?.id || ''}
               tagGroups={tagGroups}
               onOpenPdfCoding={(taskId) => navigate(`/pdf-coding/${taskId}`)}
+              onTextSelect={handleAiTextSelect}
             />
           </CardContent>
         </Card>
@@ -1780,24 +1912,35 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                   Select appropriate tags for this task. Fields marked with * are required.
                 </CardDescription>
               </div>
-              <Button
-                variant="outline"
-                onClick={handleGetAISuggestion}
-                disabled={loadingAISuggestion}
-                className="flex items-center gap-2"
-              >
-              {loadingAISuggestion ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4" />
-                  Get AI Suggestion
-                </>
-              )}
-              </Button>
+              <div className="flex flex-col items-end gap-1">
+                {aiFeaturesEnabled && (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={handleGetAISuggestion}
+                      disabled={loadingAISuggestion}
+                      className="flex items-center gap-2"
+                    >
+                    {loadingAISuggestion ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" />
+                        Get AI Suggestion
+                      </>
+                    )}
+                    </Button>
+                    <p className="text-[11px] text-gray-400 max-w-[220px] text-right">
+                      {aiSelectedText?.trim()
+                        ? `Using selection (${aiSelectedText.trim().length} chars)`
+                        : 'Select transcript/text first, or uses full task text'}
+                    </p>
+                  </>
+                )}
+              </div>
             </div>
             )}
           </CardHeader>
@@ -1830,7 +1973,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
           {/* Coding Tab Content */}
           {rightTab === 'coding' && <CardContent className="space-y-6">
             {/* AI Suggestion Display */}
-            {aiSuggestion && (
+            {aiFeaturesEnabled && aiSuggestion && (
               <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200">
                 <div className="flex items-start gap-3">
                   <Sparkles className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />

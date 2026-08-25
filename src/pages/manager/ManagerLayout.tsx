@@ -4,7 +4,6 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard,
   Users,
-  CheckSquare,
   UserCheck,
   Menu,
   X,
@@ -16,9 +15,9 @@ import {
   BookOpen,
   MessageSquare,
   FolderKanban,
-  MoreHorizontal,
   ScrollText,
   StickyNote,
+  Settings,
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Avatar from '@radix-ui/react-avatar'
@@ -31,7 +30,6 @@ import {
 export function ManagerLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [assignmentsOpen, setAssignmentsOpen] = useState(true)
-  const [dataUploadOpen, setDataUploadOpen] = useState(true)
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
@@ -40,12 +38,8 @@ export function ManagerLayout() {
   const navigation = [
     {
       name: 'Data Upload',
+      href: '/project-manager/tasks',
       icon: UploadCloud,
-      isDropdown: true,
-      children: [
-        { name: 'Tasks', href: '/project-manager/tasks', icon: CheckSquare },
-        { name: 'Others', href: '/project-manager/database', icon: MoreHorizontal },
-      ],
     },
     { name: 'Code Book', href: '/project-manager/tags', icon: BookOpen },
     {
@@ -61,6 +55,7 @@ export function ManagerLayout() {
     { name: 'Timeline', href: '/project-manager/activity', icon: ScrollText },
     { name: 'Coder Memos', href: '/project-manager/notes', icon: StickyNote },
     { name: 'Team Chat', href: '/project-manager/chat', icon: MessageSquare },
+    { name: 'Settings', href: '/project-manager/settings', icon: Settings },
   ]
 
   const handleLogout = () => {
@@ -96,11 +91,8 @@ export function ManagerLayout() {
       const Icon = item.icon
 
       if (item.isDropdown && item.children) {
-        const isOpen = item.name === 'Data Upload' ? dataUploadOpen : assignmentsOpen
-        const toggleOpen =
-          item.name === 'Data Upload'
-            ? () => setDataUploadOpen(!dataUploadOpen)
-            : () => setAssignmentsOpen(!assignmentsOpen)
+        const isOpen = assignmentsOpen
+        const toggleOpen = () => setAssignmentsOpen(!assignmentsOpen)
 
         return (
           <div key={item.name} className="space-y-1">

@@ -156,8 +156,21 @@ export async function getAnnotationSuggestion(
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail || 'Failed to get annotation suggestion');
+    let detail = `HTTP ${response.status}`;
+    try {
+      const error = await response.json();
+      if (typeof error?.detail === 'string') detail = error.detail;
+      else if (Array.isArray(error?.detail)) {
+        detail = error.detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ');
+      } else if (error?.detail) detail = JSON.stringify(error.detail);
+    } catch {
+      try {
+        detail = (await response.text()) || detail;
+      } catch {
+        /* keep default */
+      }
+    }
+    throw new Error(detail || 'Failed to get annotation suggestion');
   }
 
   return response.json();
