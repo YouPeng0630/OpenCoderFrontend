@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import {
   AlertCircle,
   CheckCircle2,
+  Compass,
   Database as DatabaseIcon,
   KeyRound,
   Loader2,
@@ -16,6 +17,7 @@ import {
   Settings as SettingsIcon,
   Sparkles,
 } from 'lucide-react'
+import { requestManagerTourStart } from '@/lib/managerTour'
 
 /** Models available only after the project adds its own OpenRouter API key */
 const UNLOCKED_MODELS = [
@@ -494,6 +496,29 @@ export function ManagerSettings() {
               Save AI Settings
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Compass className="h-5 w-5 text-primary" />
+            Product tour
+          </CardTitle>
+          <CardDescription>
+            Replay the short walkthrough of Data Upload, Code Book, Assignments, and the rest of the manager workspace.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            onClick={() => requestManagerTourStart()}
+          >
+            <Compass className="h-4 w-4" />
+            Start tour
+          </Button>
         </CardContent>
       </Card>
     </div>

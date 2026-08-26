@@ -11,7 +11,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { UserPlus, Loader2, CheckSquare, Square, AlertCircle, Send, ChevronDown } from 'lucide-react'
-import { TaskTypeFilter, taskTypeFilterParam } from '@/components/tasks/TaskTypeFilter'
+import {
+  TaskTypeFilter,
+  taskTypeFilterParam,
+  type TaskTypeFilterValue,
+} from '@/components/tasks/TaskTypeFilter'
 
 interface Coder {
   id: string
@@ -45,7 +49,7 @@ export function ManagerAssignment() {
   const [taskPage, setTaskPage] = useState(1)
   const [taskTotal, setTaskTotal] = useState(0)
   const [taskPages, setTaskPages] = useState(1)
-  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
+  const [typeFilter, setTypeFilter] = useState<TaskTypeFilterValue>(null)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set())
@@ -58,7 +62,7 @@ export function ManagerAssignment() {
 
   const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
 
-  const hasActiveFilter = typeFilter.size > 0 || !!dateFrom || !!dateTo
+  const hasActiveFilter = typeFilter !== null || !!dateFrom || !!dateTo
 
   const buildTasksQuery = (page: number, token: string) => {
     const params = new URLSearchParams({
@@ -77,7 +81,7 @@ export function ManagerAssignment() {
   useLayoutEffect(() => {
     if (user?.project_id) {
       setTaskPage(1)
-      setTypeFilter(new Set())
+      setTypeFilter(null)
       setDateFrom('')
       setDateTo('')
       setSelectedTasks(new Set())
@@ -119,6 +123,13 @@ export function ManagerAssignment() {
   }
 
   const fetchTasksPage = async (projectId: string, page: number, token: string) => {
+    // Empty Set = no types selected → show zero results (do not treat as All)
+    if (typeFilter !== null && typeFilter.size === 0) {
+      setTasks([])
+      setTaskTotal(0)
+      setTaskPages(1)
+      return
+    }
     const params = buildTasksQuery(page, token)
     const tasksResponse = await fetch(
       `${apiBaseUrl}/api/projects/${projectId}/tasks?${params.toString()}`,
@@ -573,7 +584,7 @@ export function ManagerAssignment() {
                 <button
                   type="button"
                   onClick={() => {
-                    setTypeFilter(new Set())
+                    setTypeFilter(null)
                     setDateFrom('')
                     setDateTo('')
                     setTaskPage(1)

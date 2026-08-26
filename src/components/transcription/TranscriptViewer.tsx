@@ -324,6 +324,11 @@ interface TranscriptViewerProps {
   userId: string;
   /** Notifies parent when a coding selection text changes (for AI suggest). */
   onTextSelect?: (text: string | null) => void;
+  /**
+   * When false, transcript is read-only (media-level coding mode).
+   * When true, segment/word selection + per-range tagging is enabled.
+   */
+  enableCoding?: boolean;
 }
 
 export function TranscriptViewer({
@@ -332,6 +337,7 @@ export function TranscriptViewer({
   tagGroups,
   userId,
   onTextSelect,
+  enableCoding = true,
 }: TranscriptViewerProps) {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [codings, setCodings] = useState<TranscriptCoding[]>([]);
@@ -376,6 +382,15 @@ export function TranscriptViewer({
     onTextSelect?.(selection?.textSnapshot?.trim() || null);
   }, [selection, onTextSelect]);
 
+  // Media-level mode: clear any in-progress segment selection
+  useEffect(() => {
+    if (!enableCoding) {
+      setSelection(null);
+      setSelectedLabels([]);
+      setCodingNotes("");
+    }
+  }, [enableCoding]);
+
   // Finalize segment drag on mouseup anywhere
   useEffect(() => {
     function onUp() {
@@ -402,7 +417,7 @@ export function TranscriptViewer({
   // ── Segment selection ────────────────────────────────────────────────────
 
   function handleSegmentClick(idx: number, e: React.MouseEvent) {
-    if (mode !== "segment") return;
+    if (!enableCoding || mode !== "segment") return;
     if (skipNextSegClick.current) {
       skipNextSegClick.current = false;
       return;
@@ -416,7 +431,7 @@ export function TranscriptViewer({
   }
 
   function handleSegMouseDown(idx: number, e: React.MouseEvent) {
-    if (mode !== "segment" || e.button !== 0 || e.shiftKey) return;
+    if (!enableCoding || mode !== "segment" || e.button !== 0 || e.shiftKey) return;
     e.preventDefault(); // avoid native text selection while dragging
     isSegDragging.current = true;
     dragStartSeg.current = idx;
@@ -445,6 +460,7 @@ export function TranscriptViewer({
     startWordIndex: number; endWordIndex: number;
     start: number; end: number; textSnapshot: string;
   }) {
+    if (!enableCoding) return;
     setSelection({
       mode: "word",
       startWord: sel.startWordIndex, endWord: sel.endWordIndex,
@@ -707,7 +723,7 @@ export function TranscriptViewer({
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {expanded && (
+          {expanded && enableCoding && (
             <div
               className="flex rounded border border-gray-300 overflow-hidden text-xs"
               onClick={(e) => e.stopPropagation()}
@@ -723,6 +739,11 @@ export function TranscriptViewer({
                 >Word</button>
               )}
             </div>
+          )}
+          {expanded && !enableCoding && (
+            <span className="text-[10px] uppercase tracking-wide text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
+              Read-only
+            </span>
           )}
           {expanded ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
         </div>
@@ -769,7 +790,7 @@ export function TranscriptViewer({
 
       {expanded && (
         <>
-          {mode === "word" && hasWords ? (
+          {mode === "word" && hasWords && enableCoding ? (
             /* ── Word Timeline mode ─────────────────────────── */
             <div className="flex flex-col md:flex-row">
               <div className="flex-1 min-w-0">
@@ -782,20 +803,26 @@ export function TranscriptViewer({
               {CodingPanel}
             </div>
           ) : (
-            /* ── Segment mode ────────────────────────────────── */
+            /* ── Segment list (coding or read-only) ───────────── */
             <div className="flex flex-col md:flex-row">
               <div
                 className={`flex-1 overflow-y-auto max-h-96 p-2 space-y-0.5 ${
-                  dragHoverSeg !== null ? "select-none" : ""
+                  enableCoding && dragHoverSeg !== null ? "select-none" : ""
                 }`}
               >
-                <p className="text-xs text-gray-400 px-1 mb-1">
-                  Click, Shift+click, or hold & drag to select multiple
-                </p>
+                {enableCoding ? (
+                  <p className="text-xs text-gray-400 px-1 mb-1">
+                    Click, Shift+click, or hold & drag to select segments, then apply tags
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-400 px-1 mb-1">
+                    Transcript preview only — switch to Segment-level to tag time ranges
+                  </p>
+                )}
                 {transcript.segments.map((seg) => {
                   const segCodings = getSegCodings(seg.index);
-                  const selected   = isSegSelected(seg.index);
-                  const highlighted = segCodings.length > 0;
+                  const selected   = enableCoding && isSegSelected(seg.index);
+                  const highlighted = enableCoding && segCodings.length > 0;
                   const colorClass  = highlighted ? codingColor(codings.indexOf(segCodings[0])) : "";
                   return (
                     <div
@@ -803,7 +830,9 @@ export function TranscriptViewer({
                       onMouseDown={(e) => handleSegMouseDown(seg.index, e)}
                       onMouseEnter={() => handleSegMouseEnter(seg.index)}
                       onClick={(e) => handleSegmentClick(seg.index, e)}
-                      className={`flex gap-2 p-1.5 rounded cursor-pointer transition-colors border ${
+                      className={`flex gap-2 p-1.5 rounded border ${
+                        enableCoding ? "cursor-pointer" : "cursor-default"
+                      } transition-colors ${
                         selected
                           ? "border-primary bg-primary/10"
                           : highlighted
@@ -819,7 +848,7 @@ export function TranscriptViewer({
                   );
                 })}
               </div>
-              {CodingPanel}
+              {enableCoding && CodingPanel}
             </div>
           )}
         </>

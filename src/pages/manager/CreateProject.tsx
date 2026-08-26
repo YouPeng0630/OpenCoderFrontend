@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Rocket, Loader2, AlertCircle } from 'lucide-react'
 import { getToken, saveUser, getUser } from '@/lib/storage'
+import { setForceManagerTour } from '@/lib/managerTour'
 
 export function CreateProject() {
   const [loading, setLoading] = useState(false)
@@ -70,6 +71,8 @@ export function CreateProject() {
           console.log('✅ User info updated with project_id:', projectId)
         }
 
+        // Show onboarding tour on first enter after create
+        setForceManagerTour(projectId)
         // Reload page to refresh AuthContext
         window.location.href = '/project-manager/dashboard'
       } else {
@@ -191,7 +194,7 @@ export function CreateProject() {
                 </p>
               </div>
 
-              {/* Project memo — shown on Timeline */}
+              {/* Project memo — shown on Project Logbook */}
               <div>
                 <label htmlFor="memo" className="block text-sm font-medium text-gray-700 mb-2">
                   Project memo
@@ -205,7 +208,7 @@ export function CreateProject() {
                   placeholder="Purpose, research questions, or notes for this project…"
                 />
                 <p className="mt-1 text-xs text-gray-500">
-                  Optional. Appears on the project Timeline when the project is created.
+                  Optional. Appears on the Project Logbook when the project is created.
                 </p>
               </div>
 

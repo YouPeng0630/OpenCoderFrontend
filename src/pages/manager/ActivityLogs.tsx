@@ -12,15 +12,14 @@ import { getToken } from '@/lib/storage'
 import { EXAMPLE_TIMELINE_EVENTS } from './timeline/exampleData'
 import { mergeTimelineEvents } from './timeline/mergeEvents'
 import { TimelineEventRenderer } from './timeline/renderers'
-import { ALL_TIMELINE_EVENT_TYPES } from './timeline/eventIcon'
 import { useTimelineFilters, TimelineSidebarFilters } from './timeline/TimelineFilterContext'
 import type { DayRange, TimelineActor, TimelineEvent } from './timeline/types'
 
 function mapApiEvents(raw: any[]): TimelineEvent[] {
   return (raw || []).map((e: any) => ({
     id: e.id,
-    type: e.type,
-    renderer: e.renderer,
+    type: e.type as TimelineEvent['type'],
+    renderer: e.renderer as TimelineEvent['renderer'],
     createdAt: e.createdAt,
     actor: e.actor,
     summary: e.summary,
@@ -29,7 +28,8 @@ function mapApiEvents(raw: any[]): TimelineEvent[] {
 }
 
 /**
- * Manager Project Activity Timeline — live paginated feed (5000 raw logs / page).
+ * Manager Project Logbook — live paginated event feed (what happened on the project).
+ * Distinct from future Epistemology / research-decision history (why a coding choice was made).
  * Filters live in a dedicated second sidebar (desktop) / panel above feed (mobile).
  */
 export function ManagerActivityLogs() {
@@ -39,7 +39,7 @@ export function ManagerActivityLogs() {
     selectedActors,
     hasActiveFilter,
     clearFilters,
-    setFilterOptions,
+    setAvailableActors,
   } = useTimelineFilters()
 
   const [range, setRange] = useState<DayRange>(30)
@@ -79,8 +79,7 @@ export function ManagerActivityLogs() {
   const sourceEvents = showExample ? exampleEvents : events
 
   useEffect(() => {
-    const present = new Set(sourceEvents.map((e) => e.type))
-    const types = ALL_TIMELINE_EVENT_TYPES.filter((t) => present.has(t))
+    // People only — event types are a fixed catalog in the filter sidebar
     const map = new Map<string, TimelineActor>()
     for (const e of sourceEvents) {
       if (!e.actor?.id || map.has(e.actor.id)) continue
@@ -91,8 +90,8 @@ export function ManagerActivityLogs() {
       if (b.id === 'system') return 1
       return (a.name || '').localeCompare(b.name || '')
     })
-    setFilterOptions(types, actors)
-  }, [sourceEvents, setFilterOptions])
+    setAvailableActors(actors)
+  }, [sourceEvents, setAvailableActors])
 
   const displayEvents = useMemo(() => {
     return sourceEvents.filter((e) => {
@@ -149,7 +148,7 @@ export function ManagerActivityLogs() {
       setEvents([])
       setHasMore(false)
       setNextCursor(null)
-      setError(e?.message || 'Failed to load timeline')
+      setError(e?.message || 'Failed to load logbook')
     } finally {
       setLoading(false)
     }
@@ -207,10 +206,12 @@ export function ManagerActivityLogs() {
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900">
             <Activity className="h-6 w-6" />
-            Activity Timeline
+            Project Logbook
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            What happened on this project — members, files, codebook, and coding.
+            A chronological event log of what happened on this project (tasks, people, codebook,
+            coding, settings). Not a research epistemology journal — that would capture{' '}
+            <em>why</em> coding or codebook decisions were made.
           </p>
         </div>
 
@@ -262,7 +263,7 @@ export function ManagerActivityLogs() {
         </div>
       ) : sourceEvents.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-16 text-center">
-          <p className="text-sm font-medium text-slate-700">No activity yet</p>
+          <p className="text-sm font-medium text-slate-700">No logbook events yet</p>
           <p className="mt-1 text-sm text-slate-500">
             Create a project, upload tasks, assign work, or approve applicants — those actions will show up here.
           </p>
@@ -287,7 +288,7 @@ export function ManagerActivityLogs() {
             </Button>
             {!showExample && hasMore && (
               <Button variant="ghost" size="sm" onClick={() => loadMore()} disabled={loadingMore}>
-                {loadingMore ? 'Loading…' : 'Load more activity'}
+                {loadingMore ? 'Loading…' : 'Load more events'}
               </Button>
             )}
           </div>

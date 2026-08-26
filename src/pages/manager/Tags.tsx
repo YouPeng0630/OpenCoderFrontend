@@ -988,10 +988,10 @@ export function ManagerTags() {
                   onChange={(e) => setChangeNote(e.target.value)}
                   className="mt-1.5 w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
                   rows={3}
-                  placeholder="Why are you making this change? (shown on Timeline)"
+                  placeholder="Why are you making this change? (shown on Project Logbook)"
                 />
                 <p className="mt-1 text-xs text-gray-500">
-                  This note will appear in the project Timeline with this codebook update.
+                  This note will appear in the Project Logbook with this codebook update.
                 </p>
               </div>
 

@@ -1,4 +1,4 @@
-/** Project Activity Timeline — event model (FE-first / mock-friendly). */
+/** Project Logbook — event model (what happened on the project). */
 
 export type TimelineRendererKind =
   | 'project'
@@ -9,7 +9,15 @@ export type TimelineRendererKind =
   | 'icr'
   | 'export'
   | 'transcription'
+  | 'memo'
+  | 'settings'
+  | 'ai'
+  | 'discussion'
 
+/**
+ * Fixed logbook event catalog (filter sidebar uses this list — not derived from API).
+ * Some types may have no events yet; they still appear as filter options.
+ */
 export type TimelineEventType =
   | 'project.created'
   | 'member.applied'
@@ -26,6 +34,10 @@ export type TimelineEventType =
   | 'export.completed'
   | 'transcription.completed'
   | 'transcription.summarized'
+  | 'memo.added'
+  | 'settings.updated'
+  | 'ai.report_generated'
+  | 'discussion.recorded'
 
 export interface TimelineActor {
   id: string

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -18,10 +18,13 @@ import {
   ScrollText,
   StickyNote,
   Settings,
+  Compass,
 } from 'lucide-react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Avatar from '@radix-ui/react-avatar'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
+import { ManagerOnboardingTour, MANAGER_TOUR_PREP_EVENT } from '@/components/tour/ManagerOnboardingTour'
+import { requestManagerTourStart } from '@/lib/managerTour'
 import {
   TimelineFilterProvider,
   TimelineSidebarFilters,
@@ -33,30 +36,46 @@ export function ManagerLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const onTimeline = location.pathname.includes('/project-manager/activity')
+  const onLogbook = location.pathname.includes('/project-manager/activity')
+
+  useEffect(() => {
+    const onPrep = (e: Event) => {
+      const detail = (e as CustomEvent<{ id?: string; target?: string }>).detail
+      if (detail?.target === 'assignments' || detail?.id === 'assignments') {
+        setAssignmentsOpen(true)
+      }
+      if (detail?.target && window.matchMedia('(max-width: 767px)').matches) {
+        setSidebarOpen(true)
+      }
+    }
+    window.addEventListener(MANAGER_TOUR_PREP_EVENT, onPrep)
+    return () => window.removeEventListener(MANAGER_TOUR_PREP_EVENT, onPrep)
+  }, [])
 
   const navigation = [
     {
       name: 'Data Upload',
       href: '/project-manager/tasks',
       icon: UploadCloud,
+      tourId: 'tasks',
     },
-    { name: 'Code Book', href: '/project-manager/tags', icon: BookOpen },
+    { name: 'Code Book', href: '/project-manager/tags', icon: BookOpen, tourId: 'tags' },
     {
       name: 'Assignments',
       icon: FolderKanban,
       isDropdown: true,
+      tourId: 'assignments',
       children: [
         { name: 'Applicants Management', href: '/project-manager/applicants', icon: Users },
         { name: 'Task Assignment', href: '/project-manager/assignment', icon: UserCheck },
       ],
     },
-    { name: 'Dashboard', href: '/project-manager/dashboard', icon: LayoutDashboard },
-    { name: 'Timeline', href: '/project-manager/activity', icon: ScrollText },
-    { name: 'Coder Memos', href: '/project-manager/notes', icon: StickyNote },
-    { name: 'Team Chat', href: '/project-manager/chat', icon: MessageSquare },
-    { name: 'Settings', href: '/project-manager/settings', icon: Settings },
-  ]
+    { name: 'Dashboard', href: '/project-manager/dashboard', icon: LayoutDashboard, tourId: 'dashboard' },
+    { name: 'Project Logbook', href: '/project-manager/activity', icon: ScrollText, tourId: 'logbook' },
+    { name: 'Coder Memos', href: '/project-manager/notes', icon: StickyNote, tourId: 'memos' },
+    { name: 'Team Chat', href: '/project-manager/chat', icon: MessageSquare, tourId: 'chat' },
+    { name: 'Settings', href: '/project-manager/settings', icon: Settings, tourId: 'settings' },
+  ] as const
 
   const handleLogout = () => {
     logout()
@@ -95,7 +114,7 @@ export function ManagerLayout() {
         const toggleOpen = () => setAssignmentsOpen(!assignmentsOpen)
 
         return (
-          <div key={item.name} className="space-y-1">
+          <div key={item.name} className="space-y-1" data-tour={item.tourId}>
             <button
               onClick={toggleOpen}
               className="w-full group flex items-center justify-between px-3 py-2 text-sm font-medium rounded-md text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
@@ -142,6 +161,7 @@ export function ManagerLayout() {
           key={item.name}
           to={item.href!}
           onClick={onNavigate}
+          data-tour={'tourId' in item ? item.tourId : undefined}
           className={({ isActive }) =>
             `group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
               isActive
@@ -165,6 +185,7 @@ export function ManagerLayout() {
 
   return (
     <TimelineFilterProvider>
+      <ManagerOnboardingTour />
       <div className="min-h-screen bg-gray-50">
         {/* Main nav sidebar */}
         <aside className="hidden md:fixed md:inset-y-0 md:left-0 md:flex md:w-64 md:flex-col z-20">
@@ -173,8 +194,8 @@ export function ManagerLayout() {
           </div>
         </aside>
 
-        {/* Dedicated Timeline filter sidebar (second rail) */}
-        {onTimeline && (
+        {/* Dedicated Project Logbook filter sidebar (second rail) */}
+        {onLogbook && (
           <aside className="hidden md:fixed md:inset-y-0 md:left-64 md:flex md:w-64 md:flex-col z-10">
             <div className="flex flex-col flex-grow bg-white border-r border-gray-200 overflow-hidden">
               <TimelineSidebarFilters />
@@ -213,7 +234,7 @@ export function ManagerLayout() {
         {/* Main content — extra left pad when filter rail is open */}
         <div
           className={`flex flex-col flex-1 ${
-            onTimeline ? 'md:pl-[32rem]' : 'md:pl-64'
+            onLogbook ? 'md:pl-[32rem]' : 'md:pl-64'
           }`}
         >
           <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white border-b border-gray-200">
@@ -258,6 +279,13 @@ export function ManagerLayout() {
                       <DropdownMenu.Item className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 rounded hover:bg-gray-100 cursor-pointer outline-none">
                         <User className="h-4 w-4" />
                         <span>Profile</span>
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 rounded hover:bg-gray-100 cursor-pointer outline-none"
+                        onSelect={() => requestManagerTourStart()}
+                      >
+                        <Compass className="h-4 w-4" />
+                        <span>Quick tour</span>
                       </DropdownMenu.Item>
                       <DropdownMenu.Separator className="h-px bg-gray-200 my-1" />
                       <DropdownMenu.Item

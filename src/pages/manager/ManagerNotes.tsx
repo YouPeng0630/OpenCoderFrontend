@@ -14,7 +14,11 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
-import { TaskTypeFilter, taskTypeFilterParam } from '@/components/tasks/TaskTypeFilter'
+import {
+  TaskTypeFilter,
+  taskTypeFilterParam,
+  type TaskTypeFilterValue,
+} from '@/components/tasks/TaskTypeFilter'
 
 interface NoteRecord {
   note_id: string
@@ -60,7 +64,7 @@ export function ManagerNotes() {
 
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
+  const [typeFilter, setTypeFilter] = useState<TaskTypeFilterValue>(null)
   const [coderFilter, setCoderFilter] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -126,6 +130,13 @@ export function ManagerNotes() {
           limit: String(pageSize),
           sort: sortOrder,
         })
+        if (typeFilter !== null && typeFilter.size === 0) {
+          setNotes([])
+          setTotalNotes(0)
+          setTotalPages(1)
+          setLoading(false)
+          return
+        }
         const typeParam = taskTypeFilterParam(typeFilter)
         if (typeParam) params.set('task_type', typeParam)
         if (coderFilter !== 'all') params.set('coder_id', coderFilter)
@@ -166,11 +177,11 @@ export function ManagerNotes() {
   ])
 
   const hasActiveFilter =
-    !!query || typeFilter.size > 0 || coderFilter !== 'all' || !!dateFrom || !!dateTo
+    !!query || typeFilter !== null || coderFilter !== 'all' || !!dateFrom || !!dateTo
 
   const clearFilters = () => {
     setQuery('')
-    setTypeFilter(new Set())
+    setTypeFilter(null)
     setCoderFilter('all')
     setDateFrom('')
     setDateTo('')

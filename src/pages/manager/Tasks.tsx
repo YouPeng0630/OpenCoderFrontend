@@ -17,7 +17,11 @@ import { MultimodalTaskUpload } from '@/components/tasks/MultimodalTaskUpload'
 import { parseBibliographyFile, BibliographicEntry, bibliographyToTaskPayload } from '@/lib/bibliography-parser'
 import { TranscriptControl } from '@/components/transcription/TranscriptControl'
 import { TaskMediaPreview } from '@/components/tasks/TaskMediaPreview'
-import { TaskTypeFilter, taskTypeFilterParam } from '@/components/tasks/TaskTypeFilter'
+import {
+  TaskTypeFilter,
+  taskTypeFilterParam,
+  type TaskTypeFilterValue,
+} from '@/components/tasks/TaskTypeFilter'
 
 interface Task {
   id: string
@@ -75,7 +79,7 @@ export function ManagerTasks() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'pending' | 'in-progress' | 'completed'>('all')
-  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
+  const [typeFilter, setTypeFilter] = useState<TaskTypeFilterValue>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -139,6 +143,14 @@ export function ManagerTasks() {
       })
       const backendStatus = toBackendStatus(filter)
       if (backendStatus) params.set('status', backendStatus)
+      // Empty Set = no types selected → show zero results (do not treat as All)
+      if (typeFilter !== null && typeFilter.size === 0) {
+        setTasks([])
+        setTotalTasks(0)
+        setTotalPages(1)
+        setLoading(false)
+        return
+      }
       const typeParam = taskTypeFilterParam(typeFilter)
       if (typeParam) params.set('task_type', typeParam)
       if (dateFrom) params.set('date_from', dateFrom)
@@ -560,7 +572,8 @@ export function ManagerTasks() {
   }
 
   const safePage = Math.min(currentPage, totalPages)
-  const hasActiveFilter = filter !== 'all' || typeFilter.size > 0 || !!dateFrom || !!dateTo || !!searchQuery
+  const hasActiveFilter =
+    filter !== 'all' || typeFilter !== null || !!dateFrom || !!dateTo || !!searchQuery
 
   const getStatusColor = (status: Task['status']) => {
     switch (status) {
@@ -668,7 +681,7 @@ export function ManagerTasks() {
           <button
             onClick={() => {
               setSearchQuery('')
-              setTypeFilter(new Set())
+              setTypeFilter(null)
               setDateFrom('')
               setDateTo('')
               setFilter('all')

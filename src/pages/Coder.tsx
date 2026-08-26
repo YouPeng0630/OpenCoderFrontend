@@ -241,6 +241,9 @@ const DriveMediaEmbed = React.memo(function DriveMediaEmbed({
 
 const MemoTranscriptViewer = React.memo(TranscriptViewer)
 
+/** Audio/video coding granularity chosen by the coder */
+export type AvCodingGranularity = 'media' | 'segment'
+
 /** Left-column media + transcript; skipped when only notes/tags state changes. */
 const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
   task,
@@ -249,6 +252,7 @@ const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
   tagGroups,
   onOpenPdfCoding,
   onTextSelect,
+  segmentCodingEnabled = true,
 }: {
   task: Task
   projectId: string
@@ -256,6 +260,8 @@ const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
   tagGroups: any[]
   onOpenPdfCoding: (taskId: string) => void
   onTextSelect?: (text: string | null) => void
+  /** When false (media-level mode), transcript is read-only. */
+  segmentCodingEnabled?: boolean
 }) {
   const imgPayload = getPayloadImage(task)
   const videoPayload = getPayloadVideo(task)
@@ -515,6 +521,7 @@ const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
           tagGroups={tagGroups}
           userId={userId}
           onTextSelect={onTextSelect}
+          enableCoding={segmentCodingEnabled}
         />
       )}
     </div>
@@ -524,6 +531,7 @@ const CoderTaskMediaPanel = React.memo(function CoderTaskMediaPanel({
   if (prev.projectId !== next.projectId || prev.userId !== next.userId) return false
   if (prev.tagGroups !== next.tagGroups) return false
   if (prev.onTextSelect !== next.onTextSelect) return false
+  if (prev.segmentCodingEnabled !== next.segmentCodingEnabled) return false
   const a = prev.task.payload || {}
   const b = next.task.payload || {}
   return (
@@ -694,6 +702,8 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
     confidence: number;
     reasoning: string;
   } | null>(null);
+  /** Audio/video: whole-media tags vs per-transcript-segment tags */
+  const [avCodingGranularity, setAvCodingGranularity] = useState<AvCodingGranularity>('media');
 
   // 任务类型选择相关状态
   const [showTaskTypeSelector, setShowTaskTypeSelector] = useState(false);
@@ -965,6 +975,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
         setMemoContent('');
         setAiSelectedText(null);
         setAiSuggestion(null);
+        setAvCodingGranularity('media');
         if (user?.project_id) loadMemo(transformedTask.id, user.project_id);
         console.log('✅ Current task loaded:', transformedTask.id, 'type:', transformedTask.task_type);
       } else {
@@ -1098,7 +1109,22 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
     });
   };
 
+  const hasVideoMedia = !!(currentTask && getPayloadVideo(currentTask));
+  const hasAudioMedia = !!(currentTask && getPayloadAudio(currentTask));
+  const isAvMediaTask = hasVideoMedia || hasAudioMedia;
+  const avMediaLevelLabel =
+    hasVideoMedia && hasAudioMedia
+      ? 'Media-level'
+      : hasVideoMedia
+        ? 'Video-level'
+        : 'Audio-level';
+  const segmentCodingEnabled = !isAvMediaTask || avCodingGranularity === 'segment';
+
   const validateAnnotation = (): string | null => {
+    // Segment-level A/V coding: tags live on transcript ranges, not whole-task form
+    if (isAvMediaTask && avCodingGranularity === 'segment') {
+      return null;
+    }
     // Check required tag groups
     for (const group of tagGroups) {
       if (group.required) {
@@ -1479,6 +1505,9 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
             setNote('');
             setMemoContent('');
             setRightTab('coding');
+            setAvCodingGranularity('media');
+            setAiSelectedText(null);
+            setAiSuggestion(null);
             if (user?.project_id) loadMemo(transformedTask.id, user.project_id);
             setMessage(null);
           }
@@ -1860,7 +1889,42 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
               <Badge variant="secondary">Assigned</Badge>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            {isAvMediaTask && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p className="text-xs font-medium text-gray-700 mb-2">Coding granularity</p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAvCodingGranularity('media')}
+                    className={`flex-1 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                      avCodingGranularity === 'media'
+                        ? 'border-primary bg-white text-gray-900 shadow-sm ring-1 ring-primary'
+                        : 'border-gray-200 bg-white/60 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className="font-medium">{avMediaLevelLabel}</span>
+                    <span className="mt-0.5 block text-[11px] text-gray-500">
+                      Tag the entire {hasVideoMedia && !hasAudioMedia ? 'video' : hasAudioMedia && !hasVideoMedia ? 'audio' : 'media'} clip
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAvCodingGranularity('segment')}
+                    className={`flex-1 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                      avCodingGranularity === 'segment'
+                        ? 'border-primary bg-white text-gray-900 shadow-sm ring-1 ring-primary'
+                        : 'border-gray-200 bg-white/60 text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className="font-medium">Segment-level</span>
+                    <span className="mt-0.5 block text-[11px] text-gray-500">
+                      Select time ranges in the transcript and tag each separately
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
             <CoderTaskMediaPanel
               task={currentTask}
               projectId={user?.project_id || ''}
@@ -1868,6 +1932,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
               tagGroups={tagGroups}
               onOpenPdfCoding={(taskId) => navigate(`/pdf-coding/${taskId}`)}
               onTextSelect={handleAiTextSelect}
+              segmentCodingEnabled={segmentCodingEnabled}
             />
           </CardContent>
         </Card>
@@ -1907,13 +1972,19 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
             {rightTab === 'coding' && (
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Annotation Tags</CardTitle>
+                <CardTitle>
+                  {isAvMediaTask && avCodingGranularity === 'segment'
+                    ? 'Segment coding'
+                    : 'Annotation Tags'}
+                </CardTitle>
                 <CardDescription>
-                  Select appropriate tags for this task. Fields marked with * are required.
+                  {isAvMediaTask && avCodingGranularity === 'segment'
+                    ? 'Apply tags to selected transcript segments on the left. Then mark the task complete when finished.'
+                    : 'Select appropriate tags for this task. Fields marked with * are required.'}
                 </CardDescription>
               </div>
               <div className="flex flex-col items-end gap-1">
-                {aiFeaturesEnabled && (
+                {aiFeaturesEnabled && !(isAvMediaTask && avCodingGranularity === 'segment') && (
                   <>
                     <Button
                       variant="outline"
@@ -1973,7 +2044,7 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
           {/* Coding Tab Content */}
           {rightTab === 'coding' && <CardContent className="space-y-6">
             {/* AI Suggestion Display */}
-            {aiFeaturesEnabled && aiSuggestion && (
+            {aiFeaturesEnabled && aiSuggestion && avCodingGranularity !== 'segment' && (
               <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200">
                 <div className="flex items-start gap-3">
                   <Sparkles className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -1991,7 +2062,21 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                 </div>
               </div>
             )}
-            {tagGroups.length === 0 ? (
+
+            {isAvMediaTask && avCodingGranularity === 'segment' ? (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 space-y-2">
+                <p className="font-medium">Segment-level tagging</p>
+                <ol className="list-decimal list-inside space-y-1 text-blue-800 text-xs leading-relaxed">
+                  <li>Select one or more transcript segments (click, Shift+click, or drag).</li>
+                  <li>Apply codebook tags for that time range in the transcript panel.</li>
+                  <li>Repeat for other segments — each range keeps its own tags.</li>
+                  <li>When finished, mark the task complete below.</li>
+                </ol>
+                <p className="text-[11px] text-blue-700/80">
+                  Needs an available transcript under the media player. If none appears, ask a manager to run transcription first.
+                </p>
+              </div>
+            ) : tagGroups.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <AlertCircle className="h-12 w-12 mx-auto mb-2 text-gray-400" />
                 <p>No tag groups configured for this project.</p>
@@ -2110,7 +2195,9 @@ export const Coder: React.FC<CoderProps> = ({ noLayout = false }) => {
                 ) : (
                   <>
                     <Save className="h-4 w-4" />
-                    Save Annotation
+                    {isAvMediaTask && avCodingGranularity === 'segment'
+                      ? 'Mark Task Complete'
+                      : 'Save Annotation'}
                   </>
                 )}
               </Button>

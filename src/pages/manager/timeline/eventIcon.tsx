@@ -15,96 +15,119 @@ import {
   PencilLine,
   FileAudio,
   Sparkles,
+  StickyNote,
+  Settings,
+  MessageSquare,
+  BarChart3,
 } from 'lucide-react'
 import type { TimelineEventType } from './types'
 
 /**
- * Icon must match the *event action*, not a loose renderer category.
- * One type → one icon + short accessible label.
+ * Fixed Project Logbook event catalog.
+ * Filter sidebar always lists every entry below (not loaded from the API).
  */
 export const EVENT_ICON: Record<
   TimelineEventType,
   { icon: LucideIcon; label: string; className: string }
 > = {
-  // Hover labels match body: sentence-case verb (Created / Updated / …).
   'project.created': {
     icon: FolderPlus,
-    label: 'Created project',
+    label: 'Project created',
     className: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   },
   'member.applied': {
     icon: UserPlus,
-    label: 'Applied to join',
+    label: 'Coder applied',
     className: 'bg-sky-50 text-sky-700 ring-sky-200',
   },
   'member.approved': {
     icon: UserCheck,
-    label: 'Approved application',
+    label: 'Coder approved',
     className: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   },
   'member.rejected': {
     icon: UserX,
-    label: 'Rejected application',
+    label: 'Coder rejected',
     className: 'bg-rose-50 text-rose-700 ring-rose-200',
   },
   'member.assigned': {
     icon: ListTodo,
-    label: 'Assigned tasks',
+    label: 'Coder assigned',
     className: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   },
   'file.uploaded': {
     icon: FileUp,
-    label: 'Uploaded tasks',
+    label: 'Task created / uploaded',
     className: 'bg-amber-50 text-amber-800 ring-amber-200',
   },
   'file.deleted': {
     icon: Trash2,
-    label: 'Deleted tasks',
+    label: 'Task deleted',
     className: 'bg-rose-50 text-rose-700 ring-rose-200',
   },
   'tag.group_created': {
     icon: Tags,
-    label: 'Created tag group',
+    label: 'Codebook group created',
     className: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   },
   'tag.group_updated': {
     icon: PencilLine,
-    label: 'Updated tag group',
+    label: 'Codebook changed',
     className: 'bg-amber-50 text-amber-800 ring-amber-200',
   },
   'tag.group_deleted': {
     icon: Tag,
-    label: 'Deleted tag group',
+    label: 'Codebook group deleted',
     className: 'bg-rose-50 text-rose-700 ring-rose-200',
   },
   'coding.activity': {
     icon: CheckCircle2,
-    label: 'Completed coding tasks',
+    label: 'Coding completed',
     className: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   },
   'icr.resolved': {
     icon: Scale,
-    label: 'Resolved ICR',
+    label: 'Consensus / ICR resolved',
     className: 'bg-rose-50 text-rose-700 ring-rose-200',
   },
   'export.completed': {
     icon: Download,
-    label: 'Exported project data',
+    label: 'Export completed',
     className: 'bg-teal-50 text-teal-700 ring-teal-200',
   },
   'transcription.completed': {
     icon: FileAudio,
-    label: 'Completed transcription',
+    label: 'Transcription completed',
     className: 'bg-sky-50 text-sky-700 ring-sky-200',
   },
   'transcription.summarized': {
     icon: Sparkles,
-    label: 'Generated summary',
+    label: 'Transcript summarized',
     className: 'bg-violet-50 text-violet-700 ring-violet-200',
+  },
+  'memo.added': {
+    icon: StickyNote,
+    label: 'Memo / note added',
+    className: 'bg-amber-50 text-amber-800 ring-amber-200',
+  },
+  'settings.updated': {
+    icon: Settings,
+    label: 'Project settings changed',
+    className: 'bg-slate-100 text-slate-700 ring-slate-200',
+  },
+  'ai.report_generated': {
+    icon: BarChart3,
+    label: 'AI report generated',
+    className: 'bg-violet-50 text-violet-700 ring-violet-200',
+  },
+  'discussion.recorded': {
+    icon: MessageSquare,
+    label: 'Discussion / decision recorded',
+    className: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
   },
 }
 
-/** Stable order for filter checkboxes */
+/** Stable order for Logbook filter checkboxes (fixed catalog). */
 export const ALL_TIMELINE_EVENT_TYPES = Object.keys(EVENT_ICON) as TimelineEventType[]
 
 export function eventTypeLabel(type: TimelineEventType): string {
