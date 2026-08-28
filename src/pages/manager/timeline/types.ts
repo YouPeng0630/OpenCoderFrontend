@@ -13,6 +13,7 @@ export type TimelineRendererKind =
   | 'settings'
   | 'ai'
   | 'discussion'
+  | 'epistemology'
 
 /**
  * Fixed logbook event catalog (filter sidebar uses this list — not derived from API).
@@ -38,6 +39,7 @@ export type TimelineEventType =
   | 'settings.updated'
   | 'ai.report_generated'
   | 'discussion.recorded'
+  | 'epistemology.reflection_recorded'
 
 export interface TimelineActor {
   id: string

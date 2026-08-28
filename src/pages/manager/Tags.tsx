@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { Plus, Edit, Trash2, AlertCircle, Loader2 } from 'lucide-react'
+import { Plus, Edit, Trash2, AlertCircle, Loader2, Sparkles } from 'lucide-react'
 import { getToken } from '@/lib/storage'
 
 interface TagOption {
@@ -217,6 +217,16 @@ export function ManagerTags() {
   const [quickAddOptionLabel, setQuickAddOptionLabel] = useState('')
   const [quickAddOptionDescription, setQuickAddOptionDescription] = useState('')
 
+  // AI codebook suggestion (returns TagGroup-shaped JSON)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiMode, setAiMode] = useState<'replace' | 'extend'>('replace')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiRationale, setAiRationale] = useState('')
+  const [aiSuggested, setAiSuggested] = useState<TagGroup[]>([])
+  const [aiMeta, setAiMeta] = useState<string>('')
+  const [aiApplying, setAiApplying] = useState(false)
+
   // Fetch tag groups
   const fetchTagGroups = async () => {
     if (!projectId) {
@@ -323,6 +333,193 @@ export function ManagerTags() {
     
     // Add timestamp to ensure uniqueness
     return `${slug}_${Date.now()}`
+  }
+
+  const mapSuggestedToTagGroups = (raw: any[]): TagGroup[] => {
+    const now = Date.now()
+    return (raw || []).map((g, i) => {
+      const name = normalizeText(g.name) || `Group ${i + 1}`
+      const group_id = normalizeText(g.group_id) || generateGroupId(name)
+      const options: TagOption[] = (g.options || []).map((o: any, j: number) => ({
+        option_id: normalizeText(o.option_id) || `opt_${now}_${i}_${j}`,
+        label: normalizeText(o.label) || 'Untitled',
+        order: typeof o.order === 'number' ? o.order : j + 1,
+        active: o.active !== false,
+        description: normalizeText(o.description),
+      }))
+      return {
+        _id: `ai_${now}_${i}`,
+        group_id,
+        name,
+        description: normalizeText(g.description),
+        type: g.type === 'multi' ? 'multi' : 'single',
+        required: !!g.required,
+        order: typeof g.order === 'number' ? g.order : i + 1,
+        active: g.active !== false,
+        options,
+      }
+    })
+  }
+
+  const openAiSuggest = () => {
+    setAiPrompt('')
+    setAiMode(tagGroups.length > 0 ? 'extend' : 'replace')
+    setAiRationale('')
+    setAiSuggested([])
+    setAiMeta('')
+    setAiOpen(true)
+  }
+
+  const runAiSuggest = async () => {
+    if (!projectId) {
+      showToast('No project selected', 'error')
+      return
+    }
+    try {
+      setAiLoading(true)
+      setAiSuggested([])
+      setAiRationale('')
+      const token = getToken()
+      if (!token) throw new Error('No authentication token')
+      const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
+      const res = await fetch(
+        `${apiBaseUrl}/api/llm/suggest-codebook?token=${encodeURIComponent(token)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_id: projectId,
+            user_prompt: aiPrompt.trim() || null,
+            sample_size: 100,
+            mode: aiMode,
+          }),
+        }
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const detail = data?.detail
+        throw new Error(
+          typeof detail === 'string' ? detail : detail?.message || `HTTP ${res.status}`
+        )
+      }
+      // Backend guarantees TagGroup-shaped tag_groups for the frontend
+      const groups = mapSuggestedToTagGroups(data.tag_groups || [])
+      if (!groups.length) throw new Error('No tag_groups returned')
+      setAiSuggested(groups)
+      setAiRationale(normalizeText(data.rationale))
+      const meta = data.metadata || {}
+      setAiMeta(
+        [
+          meta.sampled_tasks != null ? `${meta.sampled_tasks} tasks sampled` : null,
+          meta.model_used || null,
+          meta.provider || null,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      )
+    } catch (error) {
+      console.error('AI codebook suggest failed:', error)
+      showToast('Suggest failed: ' + (error as Error).message, 'error')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const updateAiGroup = (index: number, patch: Partial<TagGroup>) => {
+    setAiSuggested((prev) =>
+      prev.map((g, i) => (i === index ? { ...g, ...patch } : g))
+    )
+  }
+
+  const updateAiOption = (
+    groupIndex: number,
+    optionId: string,
+    field: 'label' | 'description',
+    value: string
+  ) => {
+    setAiSuggested((prev) =>
+      prev.map((g, i) => {
+        if (i !== groupIndex) return g
+        return {
+          ...g,
+          options: g.options.map((o) =>
+            o.option_id === optionId ? { ...o, [field]: value } : o
+          ),
+        }
+      })
+    )
+  }
+
+  const removeAiGroup = (index: number) => {
+    setAiSuggested((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const applyAiSuggested = async () => {
+    if (!projectId || aiSuggested.length === 0) return
+    for (const g of aiSuggested) {
+      if (!g.name.trim()) {
+        showToast('Each suggested group needs a name', 'error')
+        return
+      }
+      if (!g.options.length) {
+        showToast(`Group "${g.name}" needs at least one option`, 'error')
+        return
+      }
+    }
+
+    try {
+      setAiApplying(true)
+      const token = getToken()
+      if (!token) throw new Error('No authentication token')
+      const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:8000'
+
+      const stamped = aiSuggested.map((g, i) => ({
+        ...g,
+        group_id: generateGroupId(g.name),
+        order:
+          aiMode === 'replace'
+            ? i + 1
+            : tagGroups.length + i + 1,
+      }))
+
+      const updatedGroups =
+        aiMode === 'replace' ? stamped : [...tagGroups, ...stamped]
+
+      const note =
+        aiMode === 'replace'
+          ? `Applied AI-suggested codebook${aiPrompt.trim() ? `: ${aiPrompt.trim().slice(0, 120)}` : ''}`
+          : `Merged AI-suggested tag groups${aiPrompt.trim() ? `: ${aiPrompt.trim().slice(0, 120)}` : ''}`
+
+      const response = await fetch(
+        `${apiBaseUrl}/api/projects/${projectId}/tag-groups-overwrite?token=${encodeURIComponent(token)}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tag_groups: updatedGroups,
+            change_note: note,
+          }),
+        }
+      )
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null)
+        throw new Error(errorData?.detail || `HTTP ${response.status}`)
+      }
+
+      setTagGroups(updatedGroups)
+      setAiOpen(false)
+      showToast(
+        aiMode === 'replace'
+          ? 'AI codebook applied (you can keep editing groups)'
+          : 'AI groups merged into codebook',
+        'success'
+      )
+    } catch (error) {
+      console.error('Apply AI codebook failed:', error)
+      showToast('Apply failed: ' + (error as Error).message, 'error')
+    } finally {
+      setAiApplying(false)
+    }
   }
 
   // Add new tag group
@@ -607,10 +804,21 @@ export function ManagerTags() {
             Manage tag groups and options for your project. Changes are saved automatically.
           </p>
         </div>
-        <Button onClick={addTagGroup} className="flex items-center gap-2">
-          <Plus className="h-4 w-4" />
-          Add Tag Group
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={openAiSuggest}
+            className="flex items-center gap-2"
+            disabled={!projectId}
+          >
+            <Sparkles className="h-4 w-4" />
+            Suggest with AI
+          </Button>
+          <Button onClick={addTagGroup} className="flex items-center gap-2">
+            <Plus className="h-4 w-4" />
+            Add Tag Group
+          </Button>
+        </div>
       </div>
 
       {/* Tag Groups Grid */}
@@ -861,6 +1069,193 @@ export function ManagerTags() {
                 </div>
               </div>
             )}
+        </DialogContent>
+      </Dialog>
+
+      {/* AI codebook suggestion — expects / returns TagGroup shape */}
+      <Dialog
+        open={aiOpen}
+        onOpenChange={(open) => {
+          if (!aiLoading && !aiApplying) setAiOpen(open)
+        }}
+      >
+        <DialogContent className="max-h-[90vh] w-[95vw] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl">
+              <Sparkles className="h-5 w-5 text-primary" />
+              Suggest codebook with AI
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Samples up to 100 recent tasks, combines them with your prompt, and returns{' '}
+              <span className="font-medium text-gray-800">tag groups</span> in the same format
+              this page uses — tweak anything before applying.
+            </p>
+
+            <div>
+              <Label className="text-sm font-medium text-gray-700">Your prompt (optional)</Label>
+              <textarea
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                className="mt-1.5 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                rows={3}
+                placeholder="e.g. Focus on policy stance and stakeholder type; prefer single-choice groups; English labels…"
+                disabled={aiLoading || aiApplying}
+              />
+            </div>
+
+            <div>
+              <Label className="text-sm font-medium text-gray-700 mb-2 block">Apply mode</Label>
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input
+                    type="radio"
+                    checked={aiMode === 'replace'}
+                    onChange={() => setAiMode('replace')}
+                    disabled={aiLoading || aiApplying}
+                  />
+                  Replace current codebook
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input
+                    type="radio"
+                    checked={aiMode === 'extend'}
+                    onChange={() => setAiMode('extend')}
+                    disabled={aiLoading || aiApplying}
+                  />
+                  Merge as new groups (keep existing)
+                </label>
+              </div>
+              {aiMode === 'replace' && tagGroups.length > 0 && (
+                <p className="mt-1 text-xs text-amber-700">
+                  Applying will overwrite your current {tagGroups.length} tag group
+                  {tagGroups.length === 1 ? '' : 's'}.
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <Button onClick={runAiSuggest} disabled={aiLoading || aiApplying} className="gap-2">
+                {aiLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Generating…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    Generate suggestions
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {aiMeta && (
+              <p className="text-xs text-gray-400">{aiMeta}</p>
+            )}
+            {aiRationale && (
+              <div className="rounded-md border border-gray-100 bg-slate-50 px-3 py-2 text-sm text-gray-700">
+                {aiRationale}
+              </div>
+            )}
+
+            {aiSuggested.length > 0 && (
+              <div className="space-y-3 border-t pt-4">
+                <p className="text-sm font-medium text-gray-800">
+                  Suggested tag groups (editable)
+                </p>
+                {aiSuggested.map((g, gi) => (
+                  <div key={g._id} className="rounded-lg border border-gray-200 p-3 space-y-2">
+                    <div className="flex flex-wrap items-start gap-2">
+                      <input
+                        type="text"
+                        value={g.name}
+                        onChange={(e) => updateAiGroup(gi, { name: e.target.value })}
+                        className="min-w-[140px] flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                        placeholder="Group name"
+                      />
+                      <select
+                        value={g.type}
+                        onChange={(e) =>
+                          updateAiGroup(gi, {
+                            type: e.target.value === 'multi' ? 'multi' : 'single',
+                          })
+                        }
+                        className="rounded border border-gray-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="single">Single</option>
+                        <option value="multi">Multi</option>
+                      </select>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-600"
+                        onClick={() => removeAiGroup(gi)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <textarea
+                      value={g.description || ''}
+                      onChange={(e) => updateAiGroup(gi, { description: e.target.value })}
+                      className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                      rows={2}
+                      placeholder="Group description"
+                    />
+                    <div className="space-y-2 pl-1">
+                      {g.options.map((o) => (
+                        <div key={o.option_id} className="rounded-md bg-gray-50 p-2 space-y-1">
+                          <input
+                            type="text"
+                            value={o.label}
+                            onChange={(e) =>
+                              updateAiOption(gi, o.option_id, 'label', e.target.value)
+                            }
+                            className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                            placeholder="Option label"
+                          />
+                          <input
+                            type="text"
+                            value={o.description || ''}
+                            onChange={(e) =>
+                              updateAiOption(gi, o.option_id, 'description', e.target.value)
+                            }
+                            className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
+                            placeholder="Option description (optional)"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setAiOpen(false)}
+                    disabled={aiApplying}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={applyAiSuggested} disabled={aiApplying} className="gap-2">
+                    {aiApplying ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Applying…
+                      </>
+                    ) : aiMode === 'replace' ? (
+                      'Apply codebook'
+                    ) : (
+                      'Merge into codebook'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

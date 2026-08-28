@@ -19,6 +19,7 @@ import {
   Settings,
   MessageSquare,
   BarChart3,
+  Compass,
 } from 'lucide-react'
 import type { TimelineEventType } from './types'
 
@@ -124,6 +125,11 @@ export const EVENT_ICON: Record<
     icon: MessageSquare,
     label: 'Discussion / decision recorded',
     className: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  },
+  'epistemology.reflection_recorded': {
+    icon: Compass,
+    label: 'Epistemology reflection',
+    className: 'bg-teal-50 text-teal-800 ring-teal-200',
   },
 }
 

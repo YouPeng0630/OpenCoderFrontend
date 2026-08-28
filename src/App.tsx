@@ -15,6 +15,7 @@ import { ManagerAssignment } from '@/pages/manager/Assignment';
 import { ManagerChat } from '@/pages/manager/Chat';
 import { ManagerActivityLogs } from '@/pages/manager/ActivityLogs';
 import { ManagerNotes } from '@/pages/manager/ManagerNotes';
+import { ManagerEpistemology } from '@/pages/manager/Epistemology';
 import { ManagerSettings } from '@/pages/manager/Settings';
 import { ConsensusResolution } from '@/pages/manager/ConsensusResolution';
 import { Coder } from '@/pages/Coder';
@@ -90,6 +91,7 @@ function App() {
             <Route path="settings" element={<ManagerSettings />} />
             <Route path="database" element={<Navigate to="/project-manager/settings" replace />} />
             <Route path="activity" element={<ManagerActivityLogs />} />
+            <Route path="epistemology" element={<ManagerEpistemology />} />
             <Route path="notes" element={<ManagerNotes />} />
             <Route path="consensus/:taskId" element={<ConsensusResolution />} />
           </Route>

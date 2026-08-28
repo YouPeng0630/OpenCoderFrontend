@@ -72,6 +72,7 @@ export function ManagerLayout() {
     },
     { name: 'Dashboard', href: '/project-manager/dashboard', icon: LayoutDashboard, tourId: 'dashboard' },
     { name: 'Project Logbook', href: '/project-manager/activity', icon: ScrollText, tourId: 'logbook' },
+    { name: 'Epistemology', href: '/project-manager/epistemology', icon: Compass, tourId: 'epistemology' },
     { name: 'Coder Memos', href: '/project-manager/notes', icon: StickyNote, tourId: 'memos' },
     { name: 'Team Chat', href: '/project-manager/chat', icon: MessageSquare, tourId: 'chat' },
     { name: 'Settings', href: '/project-manager/settings', icon: Settings, tourId: 'settings' },
