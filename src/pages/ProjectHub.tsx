@@ -11,7 +11,10 @@ import {
   UserPlus,
   FolderKanban,
   LogOut,
+  HelpCircle,
 } from 'lucide-react'
+import { HubOnboardingTour } from '@/components/tour/HubOnboardingTour'
+import { requestHubTourStart } from '@/lib/hubTour'
 
 interface HubProject {
   membership_id: string
@@ -86,21 +89,34 @@ export function ProjectHub() {
       <div className="max-w-3xl mx-auto px-4 py-10">
         <div className="flex items-start justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Your Projects</h1>
+            <h1 className="text-3xl font-bold text-gray-900" data-tour="hub-welcome">
+              Hi, {user?.username}
+            </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Welcome, {user?.username}. Create a project or join one to continue.
+              This is your project list.
             </p>
             <p className="text-xs text-gray-400 mt-2">
               {total} / {limit} projects (create + join)
             </p>
           </div>
-          <button
-            onClick={() => { logout(); navigate('/login') }}
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 px-3 py-2 rounded-lg hover:bg-white/60"
-          >
-            <LogOut className="h-4 w-4" />
-            Log out
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => requestHubTourStart()}
+              className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 px-3 py-2 rounded-lg hover:bg-white/60"
+              aria-label="Quick tour"
+            >
+              <HelpCircle className="h-4 w-4" />
+              Quick tour
+            </button>
+            <button
+              onClick={() => { logout(); navigate('/login') }}
+              className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 px-3 py-2 rounded-lg hover:bg-white/60"
+            >
+              <LogOut className="h-4 w-4" />
+              Log out
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
@@ -108,6 +124,7 @@ export function ProjectHub() {
             className="h-auto py-4 flex flex-col items-start gap-1"
             disabled={atLimit}
             onClick={() => navigate('/project-manager/create-project')}
+            data-tour="hub-create"
           >
             <span className="flex items-center gap-2 text-base font-semibold">
               <Plus className="h-5 w-5" />
@@ -122,6 +139,7 @@ export function ProjectHub() {
             className="h-auto py-4 flex flex-col items-start gap-1 bg-white"
             disabled={atLimit}
             onClick={() => navigate('/coder/apply')}
+            data-tour="hub-join"
           >
             <span className="flex items-center gap-2 text-base font-semibold">
               <UserPlus className="h-5 w-5" />
@@ -139,7 +157,7 @@ export function ProjectHub() {
           </p>
         )}
 
-        <div className="space-y-3">
+        <div className="space-y-3" data-tour="hub-list">
           <h2 className="text-sm font-medium text-gray-700 flex items-center gap-2">
             <FolderKanban className="h-4 w-4" />
             Projects you belong to
@@ -223,6 +241,7 @@ export function ProjectHub() {
           )}
         </div>
       </div>
+      <HubOnboardingTour />
     </div>
   )
 }
